@@ -1,0 +1,294 @@
+{
+  "广东": [
+    {
+      "title": "东莞新闻综合高清",
+      "code": "02000006000000052022060699000003",
+      "ztecode": "ch000000000000378",
+      "icon": "http://183.235.11.40:8081/pics/micro-picture/channel/2022-06-10/c628ccef-d5f7-44eb-860d-744fed3fa9b6.png",
+      "zteurl": "rtp://239.21.0.137:3892",
+      "supports_catchup": true,
+      "quality": "高清"
+    },
+    {
+      "title": "东莞生活资讯高清",
+      "code": "02000006000000052022060699000004",
+      "ztecode": "ch000000000000379",
+      "icon": "http://183.235.11.40:8081/pics/micro-picture/channelNew/02000006000000052022060699000002.png",
+      "zteurl": "rtp://239.21.0.138:3896",
+      "supports_catchup": true,
+      "quality": "高清"
+    },
+    {
+      "title": "广州新闻-测试",
+      "code": "02000001000000050000000000000278",
+      "ztecode": "",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channel/2022-01-24/e2662c03-e9d5-41a3-9c9b-bcbad20041c1.png",
+      "zteurl": "rtp://239.11.0.139:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    },
+    {
+      "title": "广州综合-测试",
+      "code": "02000001000000050000000000000413",
+      "ztecode": "",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channel/2022-01-24/a07be909-5ee9-422a-8289-5fcf6f26734d.png",
+      "zteurl": "rtp://239.11.0.138:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    },
+    {
+      "title": "广州法治高清",
+      "code": "custom_gzfz",
+      "ztecode": "",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channel/2022-01-24/8e4502e5-2a1b-4f05-b26a-e3e4e90ff14f.png",
+      "zteurl": "rtp://239.11.0.141:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    }
+  ],
+  "广东地方台": [
+    {
+      "title": "韶关综合高清",
+      "code": "02000004000000052014120300000003",
+      "ztecode": "",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channel/2020-11-04/e56deee4-990e-443d-8568-0f01953aed53.png",
+      "zteurl": "rtp://239.11.0.84:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    },
+    {
+      "title": "惠州综合高清",
+      "code": "02000006000000052018042499000003",
+      "ztecode": "ch000000000000268",
+      "icon": "http://183.235.16.92:8081/pics/category/201911/19/2019111916265450047441.png",
+      "zteurl": "rtp://239.21.0.27:3448",
+      "supports_catchup": true,
+      "quality": "高清"
+    },
+    {
+      "title": "惠州公共高清",
+      "code": "02000006000000052018042499000004",
+      "ztecode": "ch000000000000269",
+      "icon": "http://183.235.16.92:8081/pics/category/201911/19/2019111916270629135114.png",
+      "zteurl": "rtp://239.21.0.28:3452",
+      "supports_catchup": true,
+      "quality": "高清"
+    },
+    {
+      "title": "珠海新闻综合高清",
+      "code": "02000006000000052018122099000001",
+      "ztecode": "",
+      "icon": "http://183.235.16.92:8081/pics/category/201908/07/2019080709093201734725.png",
+      "zteurl": "rtp://239.10.0.242:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    },
+    {
+      "title": "湛江新闻综合高清",
+      "code": "02000006000000052019072699000001",
+      "ztecode": "",
+      "icon": "http://183.235.16.92:8081/pics/category/201907/30/2019073010261377277040.png",
+      "zteurl": "rtp://239.10.0.253:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    },
+    {
+      "title": "湛江公共高清",
+      "code": "02000006000000052019072699000002",
+      "ztecode": "",
+      "icon": "http://183.235.16.92:8081/pics/category/201907/30/2019073010262340621258.png",
+      "zteurl": "rtp://239.10.0.254:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    },
+    {
+      "title": "肇庆新闻综合高清",
+      "code": "02000006000000052020030299000001",
+      "ztecode": "",
+      "icon": "http://183.235.16.92:8081/pics/category/202003/04/2020030416522873605320.png",
+      "zteurl": "rtp://239.11.0.53:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    },
+    {
+      "title": "肇庆公共高清",
+      "code": "02000006000000052020030299000002",
+      "ztecode": "",
+      "icon": "http://183.235.16.92:8081/pics/category/202003/04/2020030416505253496115.png",
+      "zteurl": "rtp://239.11.0.54:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    },
+    {
+      "title": "河源新闻综合高清",
+      "code": "02000006000000052020022799000003",
+      "ztecode": "ch000000000000289",
+      "icon": "http://183.235.16.92:8081/pics/category/202003/01/2020030117193955295638.png",
+      "zteurl": "rtp://239.21.0.48:3532",
+      "supports_catchup": true,
+      "quality": "高清"
+    },
+    {
+      "title": "河源公共高清",
+      "code": "02000006000000052020022799000004",
+      "ztecode": "ch000000000000290",
+      "icon": "http://183.235.16.92:8081/pics/category/202003/01/2020030117190996128420.png",
+      "zteurl": "rtp://239.21.0.49:3536",
+      "supports_catchup": true,
+      "quality": "高清"
+    },
+    {
+      "title": "清远综合高清",
+      "code": "02000006000000052020080599000004",
+      "ztecode": "",
+      "icon": "http://183.235.16.92:8081/pics/category/202008/21/2020082110053962680033.png",
+      "zteurl": "rtp://239.11.0.74:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    },
+    {
+      "title": "汕尾综合高清",
+      "code": "02000006000000052020120499000001",
+      "ztecode": "ch000000000000330",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channel/2020-12-09/9de57253-11a8-453c-997b-0a1121e96b9b.png",
+      "zteurl": "rtp://239.21.0.89:3696",
+      "supports_catchup": true,
+      "quality": "高清"
+    },
+    {
+      "title": "汕尾公共高清",
+      "code": "02000006000000052020120499000002",
+      "ztecode": "ch000000000000331",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channel/2020-12-09/264776c0-4106-42e1-af74-f416684fe4ac.png",
+      "zteurl": "rtp://239.21.0.90:3700",
+      "supports_catchup": true,
+      "quality": "高清"
+    },
+    {
+      "title": "云浮综合高清",
+      "code": "02000006000000052020090199000001",
+      "ztecode": "",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channel/2021-06-09/7fd26546-e6ea-4be0-89ad-ecf26175e31d.png",
+      "zteurl": "rtp://239.11.0.96:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    },
+    {
+      "title": "云浮公共高清",
+      "code": "02000006000000052020090199000002",
+      "ztecode": "",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channel/2021-06-09/7b91e4bb-352e-4887-b4a5-36355100227d.png",
+      "zteurl": "rtp://239.11.0.97:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    },
+    {
+      "title": "揭阳综合高清",
+      "code": "02000006000000052020123099000001",
+      "ztecode": "ch000000000000332",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channel/2021-01-14/e6567478-4da8-42d9-8fe4-9c8e967fc3a9.png",
+      "zteurl": "rtp://239.21.0.91:3704",
+      "supports_catchup": true,
+      "quality": "高清"
+    },
+    {
+      "title": "揭阳公共高清",
+      "code": "02000006000000052020123099000002",
+      "ztecode": "ch000000000000333",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channel/2021-01-14/9c5c5481-dd95-4716-9373-d05b601f8235.png",
+      "zteurl": "rtp://239.21.0.92:3708",
+      "supports_catchup": true,
+      "quality": "高清"
+    },
+    {
+      "title": "江门综合高清",
+      "code": "02000006000000052021012199000001",
+      "ztecode": "",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channel/2021-03-10/d887674a-d010-4997-a751-80f6aceb6523.png",
+      "zteurl": "rtp://239.10.0.219:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    },
+    {
+      "title": "茂名综合高清",
+      "code": "02000006000000052021022099000001",
+      "ztecode": "",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channel/2021-03-10/f5cd92f1-0bdf-4bda-8943-b91473ef2f45.png",
+      "zteurl": "rtp://239.10.0.238:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    },
+    {
+      "title": "汕头新闻综合高清",
+      "code": "02000006000000052021050799000004",
+      "ztecode": "ch000000000000342",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channel/2021-05-13/17840269-4308-4ae5-ad34-0763e2a41b5b.png",
+      "zteurl": "rtp://239.21.0.101:3744",
+      "supports_catchup": true,
+      "quality": "高清"
+    },
+    {
+      "title": "汕头经济生活高清",
+      "code": "02000006000000052021050799000005",
+      "ztecode": "ch000000000000343",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channel/2021-05-13/203eefb4-bc69-4b30-9baa-3ce8ed048089.png",
+      "zteurl": "rtp://239.21.0.102:3748",
+      "supports_catchup": true,
+      "quality": "高清"
+    },
+    {
+      "title": "佛山城市生活高清",
+      "code": "02000006000000052021081899000006",
+      "ztecode": "custom_fsgg",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/2025/0815/12_1df470a2-41aa-404f-8308-4d3ccf298030.png",
+      "zteurl": "rtp://239.11.0.114:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    },
+    {
+      "title": "南海频道高清",
+      "code": "02000006000000052021081899000007",
+      "ztecode": "custom_fsnh",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channelNew/02000006000000052021081899000002.png",
+      "zteurl": "rtp://239.11.0.115:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    },
+    {
+      "title": "顺德频道高清",
+      "code": "02000006000000052021081899000008",
+      "ztecode": "custom_fssd",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channelNew/02000006000000052021081899000003.png",
+      "zteurl": "rtp://239.11.0.116:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    },
+    {
+      "title": "佛山综合高清",
+      "code": "02000006000000052021081899000010",
+      "ztecode": "custom_fszh",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channelNew/02000006000000052021081899000005.png",
+      "zteurl": "rtp://239.11.0.118:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    },
+    {
+      "title": "中山综合高清",
+      "code": "02000006000000052021091799000002",
+      "ztecode": "custom_zszh",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channelNew/02000004000000052014122200000029.png",
+      "zteurl": "rtp://239.11.0.122:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    },
+    {
+      "title": "香山文化高清",
+      "code": "02000006000000052021091799000003",
+      "ztecode": "custom_zsgg",
+      "icon": "http://183.235.16.92:8081/pics/micro-picture/channelNew/02000004000000052014122200000030.png",
+      "zteurl": "rtp://239.11.0.123:1025",
+      "supports_catchup": false,
+      "quality": "高清"
+    }
+  ]
+}
