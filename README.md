@@ -174,25 +174,38 @@ python tv.py
 ### 3. 运行效果示例
 
 ```
-你的组播转单播UDPXY地址是 http://c.top:7088/udp/
+你的组播转单播UDPXY地址是 http://c.cc.top:7088/udp/
 你的回看源前缀是 http://183.235.162.80:6610/190000002005
-你的nginx代理前缀是 http://c.top:7077
+你的nginx代理前缀是 http://c.cc.top:7077/
+你的回看URL模板是 {prefix}/{ztecode}/index.m3u8?starttime=${{utc:yyyyMMddHHmmss}}&endtime=${{utcend:yyyyMMddHHmmss}}
+你的KU9回看URL模板是 {prefix}/{ztecode}/index.m3u8?starttime=${{(b)yyyyMMddHHmmss|UTC}}&endtime=${{(e)yyyyMMddHHmmss|UTC}}
+EPG下载开关: 启用
+EPG下载配置: 重试3次, 超时15秒, 间隔2秒
 成功加载频道排序文件: channel_order.json
 成功加载自定义频道文件: custom_channels.json
 自定义频道配置: ['广东', '广东地方台']
   分组 '广东' 有 5 个频道
   分组 '广东地方台' 有 27 个频道
 成功获取 JSON 数据从 http://183.235.16.92:8082/epg/api/custom/getAllChannel.json
-已过滤 14 个黑名单频道
-已生成处理日志: channel_processing.log
+已过滤 14 个黑名单频道（主JSON）
 自定义频道名称映射: '广州新闻-测试' -> '广州新闻高清'
 自定义频道名称映射: '广州综合-测试' -> '广州综合高清'
-已为 152 个支持回看的频道添加catchup属性
+已将回看源代理至: http://c.cc.top:7077/183.235.162.80:6610/190000002005
+已为 150 个支持回看的频道添加catchup属性
+已生成M3U文件: tv.m3u
+已将回看源代理至: http://c.cc.top:7077/183.235.162.80:6610/190000002005
+已为 150 个支持回看的频道添加catchup属性
+已生成M3U文件: tv2.m3u
+已将回看源代理至: http://c.cc.top:7077/183.235.162.80:6610/190000002005
+已为 150 个支持回看的频道添加catchup属性
+已生成M3U文件: ku9.m3u
 
 已跳过 0 个缺少播放链接的频道。
+总共过滤 14 个黑名单频道（主JSON: 14, 自定义: 0）
 成功生成 191 个频道
-单播地址列表: tv2.m3u
-KU9回看参数列表: ku9.m3u
+单播地址列表: \\DS920\web\IPTV\cmcc_iptv_auto_py\tv2.m3u
+KU9回看参数列表: \\DS920\web\IPTV\cmcc_iptv_auto_py\ku9.m3u
+已生成处理日志: \\DS920\web\IPTV\cmcc_iptv_auto_py\channel_processing.log
 
 开始下载节目单...
 EPG 模式: M3U_ONLY (仅下载和合成 M3U 中的频道)
@@ -201,20 +214,20 @@ XML 文件将基于这 191 个频道生成。
 准备并行下载 191 个频道的EPG，使用 2 个epg地址下载...
   下载进度: 191/191 个频道 (100.0%)
 所有下载任务已完成。
-
-已保存节目单XML文件到: t.xml
-已生成压缩文件: t.xml.gz
+已保存节目单XML文件到: \\DS920\web\IPTV\cmcc_iptv_auto_py\t.xml
+已生成压缩文件: \\DS920\web\IPTV\cmcc_iptv_auto_py\t.xml.gz
 
 ==================================================
 EPG 合成统计
 ==================================================
-基本统计:
-   - XML 中总共写入 175 个频道
-   - 其中 175 个频道成功合成了节目数据
-   - 总共合成了 10490 个节目条目
-   - 已跳过 16 个没有节目数据的频道
 
-详细统计已保存到: epg_statistics.log
+基本统计:
+   - XML 中总共写入 176 个频道
+   - 其中 176 个频道成功合成了节目数据
+   - 总共合成了 11731 个节目条目
+   - 已跳过 15 个没有节目数据的频道
+
+详细统计已保存到: \\DS920\web\IPTV\cmcc_iptv_auto_py\epg_statistics.log
 ```
 
 ## 网络环境配置
@@ -353,6 +366,7 @@ opkg install nginx
 ### 3. 配置Nginx代理
 
 创建代理配置文件：
+- 解析器设置为自己的openwrt ip
 
 ```bash
 cat > /etc/nginx/conf.d/nginx-proxy.conf << 'EOF'
@@ -514,7 +528,7 @@ crontab -e
 
 1. **网络访问**：脚本需要能够访问 `183.235.0.0/16` 网段，必须通过IPTV接口
 2. **频道数据**：默认JSON可能不包含所有本地台，需要通过 `custom_channels.json` 手动添加
-3. **回看时间**：回看使用UTC时间，实际播放时需要+8小时
+3. **回看时间**：回看使用UTC时间
 4. **EPG数据**：大部分频道有次日的EPG数据，比网上常见的EPG源更完整
 
 ## 问题反馈
