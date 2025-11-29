@@ -455,33 +455,36 @@ server {
     listen 7077 reuseport;
     listen [::]:7077 reuseport;
     
-    resolver 10.10.10.1;
+    # 优先用本机回环，更稳更科学
+    resolver 127.0.0.1 10.10.10.1 valid=30s;
     
-    # TCP优化 - 针对直播流
-    tcp_nodelay on;     # 重要：减少直播延迟
-    tcp_nopush off;     # 关闭：避免增加直播延迟
+    # TCP优化
+    tcp_nodelay on;      # 重要：减少直播延迟
+    tcp_nopush off;      # 关闭：避免增加直播延迟
     
     # 通用代理 - 支持任意目标地址
     location ~* "^/(?<target_host>[^/]+)(?<target_path>.*)$" {
-        # 构建代理目标URL
+
         set $proxy_target "http://$target_host$target_path$is_args$args";
         
         proxy_pass $proxy_target;
+        
         proxy_set_header Host $target_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         
-
-        # 添加重定向处理
-        proxy_redirect http://$target_host/ http://$host:7077/$target_host/;
-        proxy_redirect ~^http://([^:]+):?(\d*)/(.*)$ http://$host:7077/$1:$2/$3;
+        # 核心重定向修复：一条正则足矣
+        # 捕获 http://IP:端口/剩余部分 -> 重写为 http://你的域名:7077/IP:端口/剩余部分
+        proxy_redirect ~^http://([^/]+)/(.*)$ http://$host:$server_port/$1/$2;
 
         
         proxy_connect_timeout 15s;
-        proxy_send_timeout 300s;
-        proxy_read_timeout 300s;
-        proxy_buffering off;            # 关键：直播流禁用缓冲
+        proxy_send_timeout 30s;
+        proxy_read_timeout 60s;
+        
+        # 直播核心设置：关缓冲
+        proxy_buffering off;            
         proxy_cache off;
     }
 }
