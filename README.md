@@ -279,10 +279,10 @@ EPG 合成统计
 
 - **📶 路由器**：immortalwrt 23.05，单线复用，光猫到客厅只要一条线
 
-![单线复用配置](files/20251107165649301.webp)
+![单线复用配置](files/mermaid_20251213_73ecbb.svg)
 
 - **🔧 光猫配置**：光猫改桥接后，只修改internet那边的vlan，就是划分internet vlan到单线复用线接口，用户侧自定义，设为3，iptv不划vlan，单线复用口直出（因为测试过iptv划vlan导致4分钟卡顿）
-- **⚙️ 路由器配置**：wan口上网用vlan就是eth1.3，新建iptv口不用vlan，设置就是eth1，iptv口为br-iptv(dhcp模式)，机顶盒桥接br-iptv网络可以正常观看
+- **⚙️ 路由器配置**：wan口上网用vlan就是eth1.3，新建iptv口不用vlan，设置就是eth1，iptv口为br-iptv(dhcp模式)，桥接eth2,机顶盒接端口3就是桥接br-iptv网络,可以正常使用
 - **🔐 鉴权设置**：由于实测移动iptv不鉴权，所以没有针对设置hostname、mac地址、Vendor class identifier设置
   - ⚠️ 如果设置了机顶盒mac等，导致机顶盒不可用了
 
