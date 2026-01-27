@@ -42,7 +42,7 @@
 - **🔍 自动识别**：根据JSON中的 `timeshiftAvailable` 或 `lookbackAvailable` 字段自动添加回看参数
 - **📝 双模板支持**：
   - 标准回看模板：适配OK影视_3.16,,mytv-android_V2.0.0.191[电视直播]等播放器
-  - KU9回看模板：适配酷9 1.76+
+  - KU9回看模板：适配酷9 1.76+ ios-APTV
 - **🌐 Nginx代理支持**：支持通过Nginx代理回看源，实现外网访问
 
 ### 📝 日志文件
@@ -469,25 +469,25 @@ server {
     location ~* "^/(?<target_host>[^/]+)(?<target_path>.*)$" {
 
         set $proxy_target "http://$target_host$target_path$is_args$args";
-      
+    
         proxy_pass $proxy_target;
-      
+    
         proxy_set_header Host $target_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-      
+    
         # 核心重定向修复：一条正则足矣
         # 捕获 http://IP:端口/剩余部分 -> 重写为 http://你的域名:7077/IP:端口/剩余部分
         proxy_redirect ~^http://([^/]+)/(.*)$ http://$host:$server_port/$1/$2;
 
-      
+    
         proxy_connect_timeout 15s;
         proxy_send_timeout 30s;
         proxy_read_timeout 60s;
-      
+    
         # 直播核心设置：关缓冲
-        proxy_buffering off;          
+        proxy_buffering off;        
         proxy_cache off;
     }
 }
