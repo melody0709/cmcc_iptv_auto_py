@@ -19,6 +19,13 @@ if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 # ===================== 自定义配置区域 =====================
+
+# 是否优先使用 hwurl (Huawei)
+# True  = 优先提取 hwurl (如果 hwurl 为空则回退到 zteurl)
+# False = 优先提取 zteurl (默认，如果 zteurl 为空则回退到 hwurl)
+# 注意：无论此开关如何，回看代码(ztecode)始终使用 params["ztecode"]
+IS_HWURL = True  
+
 #  EPG 下载重试配置
 EPG_DOWNLOAD_RETRY_COUNT = 3  # 重试次数
 EPG_DOWNLOAD_RETRY_DELAY = 2  # 重试间隔（秒）
@@ -53,13 +60,13 @@ CHANNEL_ORDER_FILE = "channel_order.json"        # 频道排序文件
 CUSTOM_CHANNELS_FILE = "custom_channels.json"    # 自定义频道文件
 
 # 外部 M3U 合并配置
-EXTERNAL_M3U_URL = "https://bc.188766.xyz/?ip=&mishitong=true&mima=mianfeibuhuaqian&json=true"  # 外部 M3U 下载链接
-EXTERNAL_GROUP_TITLES = ["粤语频道"]  # 要提取的 group-title 列表，例如: ["冰茶体育", "粤语频道"]
+EXTERNAL_M3U_URL = "http://bc.188766.xyz/?ip=&mishitong=true&mima=bingcha1130&json=true"  # 外部 冰茶 M3U 下载链接,密码查看telegram频道公告，科学上网后可用
+EXTERNAL_GROUP_TITLES = ["粤语频道"]  # 要提取的 group-title 列表，例如: ["冰茶体育", "粤语频道"],粤语频道播放需要科学上网
 ENABLE_EXTERNAL_M3U_MERGE = True  # 是否合并外部 M3U 到所有 M3U 文件 (True/False)
 
 #  扩展黑名单配置 - 支持按 title、code 或 zteurl 过滤
 BLACKLIST_RULES = {
-    "title": ["测试频道", "购物", "导视", "百视通", "指南", "精选频道"],
+    "title": ["测试频道", "购物", "导视", "百视通", "指南", "精选频道","移动咪咕五大联赛4K","咪咕五大联赛4K"],
     "code": [
              # "02000006000000052022060699000003",
     ],
@@ -133,7 +140,7 @@ GROUP_CLASSIFICATION_PRIORITY = [
     # "广东地方台" 和 "其他" 没有关键字，不需要在这里
 ]
 
-# 3. 定义 M3U 和 XML 文件中的 *输出顺序*  (你可以随意排列这里的顺序，"少儿" 重排序)
+# 3. 定义 M3U 和 XML 文件中的 *输出顺序* (你可以随意排列这里的顺序，"少儿" 重排序)
 GROUP_OUTPUT_ORDER = [
     "央视",
     "粤语频道",
@@ -259,6 +266,8 @@ def print_configuration():
     print(f"tv.m3u 使用nginx代理: {'是' if ENABLE_NGINX_PROXY_FOR_TV else '否'}")
     print(f"你的回看URL模板是 {CATCHUP_URL_TEMPLATE}")
     print(f"你的KU9回看URL模板是 {CATCHUP_URL_KU9}")
+    print(f"优先提取地址类型: {'HWURL (Huawei)' if IS_HWURL else 'ZTEURL (ZTE)'}")
+    print(f"回看参数代码: 始终使用 ztecode")
     print(f"EPG下载开关: {'启用' if ENABLE_EPG_DOWNLOAD else '禁用'}")
     if ENABLE_EPG_DOWNLOAD:
         print(f"EPG下载配置: 重试{EPG_DOWNLOAD_RETRY_COUNT}次, 超时{EPG_DOWNLOAD_TIMEOUT}秒, 间隔{EPG_DOWNLOAD_RETRY_DELAY}秒")
@@ -327,6 +336,7 @@ def is_blacklisted(channel):
         return True
     
     # 检查播放链接黑名单
+    # 这里的逻辑不需要修改，因为它会检查所有可能的 URL
     zteurl = channel.get("zteurl", "")
     if not zteurl:
         # 如果没有直接的 zteurl，尝试从 params 中获取
@@ -551,6 +561,9 @@ def add_custom_channels(grouped_channels, custom_channels):
     blacklisted_custom_channels = []  #  记录被过滤的自定义频道
     added_custom_channels = []  # 记录成功添加的自定义频道
     
+    # 打印自定义频道处理开始
+    print("\n正在处理自定义频道...")
+    
     for group_name, channels in custom_channels.items():
         if group_name not in grouped_channels:
             print(f"警告: 自定义分组 '{group_name}' 未在 GROUP_DEFINITIONS 中定义，将自动创建。")
@@ -569,7 +582,7 @@ def add_custom_channels(grouped_channels, custom_channels):
                 print(f"跳过黑名单中的自定义频道: {custom_channel.get('title', '未知')}")
                 continue
             
-            # --- 修改开始 ---
+            # --- 修改开始：修复 ztecode 提取逻辑 ---
             # 检查是否需要应用名称映射
             original_title = custom_channel["title"]
             if original_title in CHANNEL_NAME_MAP:
@@ -578,21 +591,81 @@ def add_custom_channels(grouped_channels, custom_channels):
             else:
                 final_name = original_title
 
+            # 提取 ztecode：先尝试从 params 中获取，如果为空则从根目录获取
+            params = custom_channel.get("params", {})
+            ztecode_from_params = params.get("ztecode", "")
+            ztecode_from_root = custom_channel.get("ztecode", "")
+            
+            # 优先使用 params 中的 ztecode，如果为空则使用根目录的
+            final_ztecode = ztecode_from_params if ztecode_from_params else ztecode_from_root
+            
+            # 提取 supports_catchup：先尝试从根目录获取，如果不存在则从 params 获取
+            supports_catchup = custom_channel.get("supports_catchup", False)
+            if not supports_catchup and params.get("supports_catchup", ""):
+                supports_catchup = params.get("supports_catchup", False)
+            
             # 为自定义频道添加必要的字段
             custom_channel["title"] = final_name           # 使用最终名称
             custom_channel["original_title"] = original_title  # 保留原始名称
             custom_channel["number"] = extract_number(final_name) # 使用最终名称提取编号
+            custom_channel["ztecode"] = final_ztecode     # 存储 ztecode
+            custom_channel["supports_catchup"] = supports_catchup  # 存储回看支持状态
             # --- 修改结束 ---
             
             custom_channel["is_custom"] = True  # 标记为自定义频道
             
+            # 【新增】对自定义频道应用 HWURL/ZTEURL 选择逻辑
+            params = custom_channel.get("params", {})
+            # 兼容 params 中的 key，也兼容根目录下的 key
+            raw_zteurl = params.get("zteurl", "") or custom_channel.get("zteurl", "")
+            raw_hwurl = params.get("hwurl", "") or custom_channel.get("hwurl", "")
+            
+            final_url = ""
+            url_source_type = ""
+
+            if IS_HWURL:
+                # 优先使用 Huawei URL
+                if raw_hwurl:
+                    final_url = raw_hwurl
+                    url_source_type = "HWURL"
+                elif raw_zteurl:
+                    final_url = raw_zteurl
+                    url_source_type = "ZTEURL"
+            else:
+                # 优先使用 ZTE URL
+                if raw_zteurl:
+                    final_url = raw_zteurl
+                    url_source_type = "ZTEURL"
+                elif raw_hwurl:
+                    final_url = raw_hwurl
+                    url_source_type = "HWURL"
+            
+            # 如果找到了有效的 URL，覆盖 custom_channel 中的 zteurl 字段
+            # 注意：M3U 生成器读取的是 custom_channel["zteurl"]
+            if final_url:
+                custom_channel["zteurl"] = final_url
+                custom_channel["url_source"] = url_source_type # 记录来源类型
+                print(f"  [{url_source_type}] {final_name} (自定义)")
+            else:
+                # 如果没有找到任何 URL，可能是旧格式或者用户只填了 url 字段
+                # 如果用户填了 "url" 字段，我们将其作为 zteurl 使用
+                fallback_url = custom_channel.get("url", "")
+                if fallback_url:
+                     custom_channel["zteurl"] = fallback_url
+                     custom_channel["url_source"] = "FALLBACK"
+                     print(f"  [FALLBACK] {final_name} (自定义)")
+                else:
+                     print(f"  [警告] 自定义频道 {final_name} 未找到有效链接")
+
             # 添加到分组
             grouped_channels[group_name].append(custom_channel)
-            # 记录成功添加的自定义频道
+            # 记录成功添加的自定义频道 (关键修复：加入 url_source 到日志记录列表)
             added_custom_channels.append({
                 "title": final_name,
                 "original_title": original_title,
-                "group": group_name
+                "group": group_name,
+                "ztecode": final_ztecode,  # 添加 ztecode 到记录
+                "url_source": custom_channel.get("url_source", "UNKNOWN") # <--- 关键修复：添加此行
             })
     
     #  返回黑名单信息和已添加的频道列表
@@ -1308,9 +1381,13 @@ def main():
 
     grouped_channels = {group: [] for group in GROUP_DEFINITIONS.keys()}
 
-
     skipped_url_count = 0 # 用于统计跳过的频道
+    
+    # 统计计数器
+    stats_zte_count = 0
+    stats_hw_count = 0
 
+    print("\n正在处理频道 URL...")
     for channel in kept_channels:
         category = categorize_channel(channel["title"])
         
@@ -1321,33 +1398,64 @@ def main():
         # 使用最终名称
         final_name = channel.get("final_name", channel["title"])
         
-        # --- 新增：处理 zteurl 和 hwurl ---
+        # --- 修改：根据 IS_HWURL 开关决定提取 hwurl 还是 zteurl ---
         params = channel.get("params", {})
-        zteurl = params.get("zteurl")
-        hwurl = params.get("hwurl")
+        
+        # 提取原始值
+        raw_zteurl = params.get("zteurl", "")
+        raw_hwurl = params.get("hwurl", "")
+        # ztecode 始终提取 ztecode (全局要求)
+        final_code = params.get("ztecode", "")
         
         final_url = ""
-        if zteurl: 
-            final_url = zteurl
-        elif hwurl: 
-            final_url = hwurl
+        url_source_type = "" # 记录来源类型
+
+        if IS_HWURL:
+            # 优先使用 Huawei URL，如果不存在则回退到 ZTE
+            if raw_hwurl:
+                final_url = raw_hwurl
+                url_source_type = "HWURL"
+            elif raw_zteurl:
+                final_url = raw_zteurl
+                url_source_type = "ZTEURL"
+        else:
+            # 默认逻辑：优先使用 ZTE URL
+            if raw_zteurl:
+                final_url = raw_zteurl
+                url_source_type = "ZTEURL"
+            elif raw_hwurl:
+                final_url = raw_hwurl
+                url_source_type = "HWURL"
         
-        # 如果两个URL都无效（不存在或为空），则跳过此频道
+        # 如果最终URL无效，则跳过此频道
         if not final_url:
             skipped_url_count += 1
+            print(f"  [跳过] {final_name} - 无有效播放链接")
             continue
+        
+        # 统计
+        if url_source_type == "ZTEURL":
+            stats_zte_count += 1
+        elif url_source_type == "HWURL":
+            stats_hw_count += 1
+            
+        # 【修改点】打印当前频道使用的 URL 类型
+        print(f"  [{url_source_type}] {final_name}")
         
         grouped_channels[category].append({
             "title": final_name,
             "original_title": channel["title"],
             "code": channel["code"],
-            "ztecode": params.get("ztecode", ""),
+            "ztecode": final_code,  # 始终使用 ztecode
             "icon": channel["icon"],
-            "zteurl": final_url,
+            "zteurl": final_url,    # 可能是 zteurl 也可能是 hwurl，取决于开关
             "number": extract_number(final_name),
             "supports_catchup": supports_catchup,
-            "is_custom": False
+            "is_custom": False,
+            "url_source": url_source_type # 存储来源，以便写入日志
         })
+        
+    print(f"URL 处理完成: 使用 ZTEURL {stats_zte_count} 个, 使用 HWURL {stats_hw_count} 个")
 
     # 添加自定义频道并获取黑名单信息
     grouped_channels, blacklisted_custom_channels, added_custom_channels = add_custom_channels(grouped_channels, custom_channels_config)
@@ -1448,10 +1556,24 @@ def main():
         for channel in kept_channels:
             original_name = channel["title"]
             final_name = channel.get("final_name", original_name)
+            
+            # 【修改点】在日志中也记录使用的 URL 类型
+            # 需要从 grouped_channels 中反查该频道的 url_source，稍微麻烦点，这里简化处理
+            # 更好的方式是在 kept_channels 阶段就处理，但这里我们遍历 grouped_channels 来找
+            source_info = ""
+            for group in grouped_channels.values():
+                for c in group:
+                    if c["original_title"] == original_name:
+                         # 检查是否是主列表频道
+                        if not c.get("is_custom", False):
+                            source_info = f" [{c.get('url_source', 'UNKNOWN')}]"
+                            break
+                if source_info: break
+            
             if original_name != final_name:
-                f.write(f"  - {original_name} -> {final_name}\n")
+                f.write(f"  - {original_name} -> {final_name}{source_info}\n")
             else:
-                f.write(f"  - {original_name}\n")
+                f.write(f"  - {original_name}{source_info}\n")
         f.write("\n\n")
         
         # ========== 自定义频道处理结果 ==========
@@ -1472,10 +1594,13 @@ def main():
                 original_name = channel['original_title']
                 final_name = channel['title']
                 group_name = channel['group']
+                # 获取 URL 来源信息
+                source_info = f" [{channel.get('url_source', 'UNKNOWN')}]"
+                
                 if original_name != final_name:
-                    f.write(f"  - [{group_name}] {original_name} -> {final_name}\n")
+                    f.write(f"  - [{group_name}] {original_name} -> {final_name}{source_info}\n")
                 else:
-                    f.write(f"  - [{group_name}] {final_name}\n")
+                    f.write(f"  - [{group_name}] {final_name}{source_info}\n")
         else:
             f.write("  (无)\n")
         f.write("\n\n")
@@ -1504,6 +1629,10 @@ def main():
         # ========== 汇总信息 ==========
         f.write("【处理汇总】\n")
         f.write(f"{LOG_SEPARATOR}\n\n")
+        f.write(f"URL 提取统计:\n")
+        f.write(f"  - 使用 ZTEURL: {stats_zte_count} 个\n")
+        f.write(f"  - 使用 HWURL:  {stats_hw_count} 个\n")
+        f.write("\n")
         f.write(f"黑名单过滤汇总:\n")
         f.write(f"  - 主JSON频道: {len(blacklisted_main_channels)} 个\n")
         f.write(f"  - 自定义频道: {len(blacklisted_custom_channels)} 个\n")

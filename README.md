@@ -2,7 +2,14 @@
 
 全流程自动化的广东移动IPTV频道列表和EPG节目单抓取工具，支持频道分组、黑名单过滤、自定义频道合并、分组排序、回看功能等。
 
-**版本日期**: 2025.11.20
+**版本日期**: 2026.02.08
+
+### 更新:自定义区域添加  IS_HWURL = False 开关
+
+- 是否优先使用 hwurl (Huawei)
+- True  = 优先提取 hwurl (如果 hwurl 为空则回退到 zteurl)
+- False = 优先提取 zteurl (默认，如果 zteurl 为空则回退到 hwurl)
+- 注意：无论此开关如何，回看代码(ztecode)始终使用 params["ztecode"],因为目前华为回看还没搞定,还是采用zte回看,华为的不一定能看吧
 
 ## 🎯 功能特性
 
@@ -469,25 +476,25 @@ server {
     location ~* "^/(?<target_host>[^/]+)(?<target_path>.*)$" {
 
         set $proxy_target "http://$target_host$target_path$is_args$args";
-    
+  
         proxy_pass $proxy_target;
-    
+  
         proxy_set_header Host $target_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-    
+  
         # 核心重定向修复：一条正则足矣
         # 捕获 http://IP:端口/剩余部分 -> 重写为 http://你的域名:7077/IP:端口/剩余部分
         proxy_redirect ~^http://([^/]+)/(.*)$ http://$host:$server_port/$1/$2;
 
-    
+  
         proxy_connect_timeout 15s;
         proxy_send_timeout 30s;
         proxy_read_timeout 60s;
-    
+  
         # 直播核心设置：关缓冲
-        proxy_buffering off;        
+        proxy_buffering off;      
         proxy_cache off;
     }
 }
