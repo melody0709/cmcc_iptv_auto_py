@@ -34,13 +34,14 @@ EPG_DOWNLOAD_TIMEOUT = 15     # 单个请求超时时间（秒）
 # 在这里修改输出文件名（保持默认即可使用原始文件名）
 TV_M3U_FILENAME = "tv.m3u"        # 组播地址列表文件
 TV2_M3U_FILENAME = "tv2.m3u"      # 转单播地址列表文件
-KU9_M3U_FILENAME = "ku9.m3u"      #  KU9回看参数格式文件
+KU9_M3U_FILENAME = "ku9.m3u"      # KU9回看参数格式文件
+APTV_M3U_FILENAME = "aptv.m3u"    # APTV回看参数格式文件 (新增)
 XML_FILENAME = "t.xml"            # XML节目单文件
 REPLACEMENT_IP = "http://c.cc.top:7088/udp"  # UDPXY地址，
 REPLACEMENT_IP_TV = ""  # tv.m3u 专用的 UDPXY 地址（默认为空，使用原始地址）
 CATCHUP_SOURCE_PREFIX = "http://183.235.162.80:6610/190000002005"  # 回看源前缀，
 NGINX_PROXY_PREFIX = ""  # 针对外网播放的nginx代理
-ENABLE_NGINX_PROXY_FOR_TV = False  # tv.m3u 是否使用 NGINX_PROXY_PREFIX 代理（默认 False）
+ENABLE_NGINX_PROXY_FOR_TV = True  # tv.m3u 是否使用 NGINX_PROXY_PREFIX 代理（默认 False）
 JSON_URL = "http://183.235.16.92:8082/epg/api/custom/getAllChannel.json" # JSON 文件下载 URL  这个地址有晴彩
 
 #  EPG 地址配置 - 可自定义修改
@@ -54,6 +55,9 @@ EPG_BASE_URLS = [
 CATCHUP_URL_TEMPLATE = "{prefix}/{ztecode}/index.m3u8?starttime=${{utc:yyyyMMddHHmmss}}&endtime=${{utcend:yyyyMMddHHmmss}}"
 #  添加KU9回看模板
 CATCHUP_URL_KU9 = "{prefix}/{ztecode}/index.m3u8?starttime=${{(b)yyyyMMddHHmmss|UTC}}&endtime=${{(e)yyyyMMddHHmmss|UTC}}"
+#  添加APTV回看模板 (新增)
+CATCHUP_URL_APTV = "{prefix}/{ztecode}/index.m3u8?starttime=${{(b)yyyyMMddHHmmss:utc}}&endtime=${{(e)yyyyMMddHHmmss:utc}}"
+
 
 # 自定义配置文件
 CHANNEL_ORDER_FILE = "channel_order.json"        # 频道排序文件
@@ -266,6 +270,7 @@ def print_configuration():
     print(f"tv.m3u 使用nginx代理: {'是' if ENABLE_NGINX_PROXY_FOR_TV else '否'}")
     print(f"你的回看URL模板是 {CATCHUP_URL_TEMPLATE}")
     print(f"你的KU9回看URL模板是 {CATCHUP_URL_KU9}")
+    print(f"你的APTV回看URL模板是 {CATCHUP_URL_APTV}")
     print(f"优先提取地址类型: {'HWURL (Huawei)' if IS_HWURL else 'ZTEURL (ZTE)'}")
     print(f"回看参数代码: 始终使用 ztecode")
     print(f"EPG下载开关: {'启用' if ENABLE_EPG_DOWNLOAD else '禁用'}")
@@ -1500,11 +1505,12 @@ def main():
     # 合并外部黑名单频道到总黑名单
     all_blacklisted_channels = blacklisted_main_channels + blacklisted_custom_channels + blacklisted_external_channels
 
-    #  生成M3U文件 - 现在生成三个文件（如果启用了外部合并，所有文件都会包含外部频道）
+    #  生成M3U文件 - 现在生成四个文件（包含新增的 APTV）
     for filename, replace_url, catchup_template, is_tv_m3u in [
         (TV_M3U_FILENAME, False, CATCHUP_URL_TEMPLATE, True),      # 组播地址，标准回看模板，tv.m3u 特殊处理
-        (TV2_M3U_FILENAME, True, CATCHUP_URL_TEMPLATE, False),      # 单播地址，标准回看模板
-        (KU9_M3U_FILENAME, True, CATCHUP_URL_KU9, False)           #  单播地址，KU9回看模板
+        (TV2_M3U_FILENAME, True, CATCHUP_URL_TEMPLATE, False),     # 单播地址，标准回看模板
+        (KU9_M3U_FILENAME, True, CATCHUP_URL_KU9, False),          # 单播地址，KU9回看模板
+        (APTV_M3U_FILENAME, True, CATCHUP_URL_APTV, False)         # 单播地址，APTV回看模板 (新增)
     ]:
         content = generate_m3u_content(grouped_channels, replace_url, catchup_template, external_channels, is_tv_m3u)
         with open(filename, 'w', encoding='utf-8') as f:
@@ -1531,7 +1537,8 @@ def main():
     else:
         print(f"成功生成 {total_channels} 个频道")
     print(f"单播地址列表: {os.path.abspath(TV2_M3U_FILENAME)}")
-    print(f"KU9回看参数列表: {os.path.abspath(KU9_M3U_FILENAME)}")  #  新增输出信息
+    print(f"KU9回看参数列表: {os.path.abspath(KU9_M3U_FILENAME)}") 
+    print(f"APTV回看参数列表: {os.path.abspath(APTV_M3U_FILENAME)}") # 新增输出信息
     
     # 统一生成完整的日志文件，包含主JSON和自定义频道的所有处理结果
     with open(CHANNEL_PROCESSING_LOG, "w", encoding="utf-8") as f:

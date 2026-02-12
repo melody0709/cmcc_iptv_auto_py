@@ -26,11 +26,12 @@
 
 ### 📋 M3U文件生成
 
-脚本会生成3个M3U文件：
+脚本会生成4个M3U文件：
 
 1. **tv.m3u**：组播地址列表（原始组播地址）
 2. **tv2.m3u**：单播地址列表（通过msd_lite转换的组播地址，回看参数支持ok影视,mytv-android[电视直播]）
-3. **ku9.m3u**：单播地址列表（回看参数格式支持 酷9 1.76+,支持ios-APTV）
+3. **ku9.m3u**：单播地址列表（回看参数格式支持 酷9 1.7.7+,旧版不支持）
+4. **aptv.m3u**：单播地址列表（回看参数格式支持 tvos-APTV）
 
 ### 📺 EPG节目单
 
@@ -47,9 +48,10 @@
 ### ⏪ 回看功能
 
 - **🔍 自动识别**：根据JSON中的 `timeshiftAvailable` 或 `lookbackAvailable` 字段自动添加回看参数
-- **📝 双模板支持**：
+- **📝 三模板支持**：
   - 标准回看模板：适配OK影视_3.16,,mytv-android_V2.0.0.191[电视直播]等播放器
-  - KU9回看模板：适配酷9 1.76+ ios-APTV
+  - KU9回看模板：适配酷9 1.7.7+
+  - aptv回看模板：适配AppleTV tvos-APTV
 - **🌐 Nginx代理支持**：支持通过Nginx代理回看源，实现外网访问
 
 ### 📝 日志文件
@@ -91,6 +93,9 @@ CATCHUP_URL_TEMPLATE = "{prefix}/{ztecode}/index.m3u8?starttime=${{utc:yyyyMMddH
 
 # KU9回看模板（酷9最新版）
 CATCHUP_URL_KU9 = "{prefix}/{ztecode}/index.m3u8?starttime=${{(b)yyyyMMddHHmmss|UTC}}&endtime=${{(e)yyyyMMddHHmmss|UTC}}"
+
+#  添加APTV回看模板 (新增)
+CATCHUP_URL_APTV = "{prefix}/{ztecode}/index.m3u8?starttime=${{(b)yyyyMMddHHmmss:utc}}&endtime=${{(e)yyyyMMddHHmmss:utc}}"
 ```
 
 ### 📺 EPG配置
@@ -130,7 +135,7 @@ ENABLE_EXTERNAL_M3U_MERGE = True  # 是否合并外部 M3U 到所有 M3U 文件 
 - ✅ 自动应用黑名单过滤规则
 - ✅ 支持 Nginx 代理（如果设置了 `NGINX_PROXY_PREFIX`，外部频道的 URL 和 Logo 会自动通过代理）
 - ✅ 智能排序：如果外部分组在 `GROUP_OUTPUT_ORDER` 中，会按顺序输出；否则会添加到 M3U 文件末尾
-- ✅ 合并到所有生成的 M3U 文件（tv.m3u、tv2.m3u、ku9.m3u）
+- ✅ 合并到所有生成的 M3U 文件（tv.m3u、tv2.m3u、ku9.m3u、 ）
 
 **⚠️ 注意事项**：
 
@@ -294,7 +299,6 @@ EPG 合成统计
 - **🔧 光猫配置**：光猫改桥接后，只修改internet那边的vlan，就是划分internet vlan到单线复用线接口，用户侧自定义，设为3，iptv不划vlan，单线复用口直出（因为测试过iptv划vlan导致4分钟卡顿）
 
   - 部分光猫也可以全走vlan,就是 默认 iptv vlan 是48 internet 是41, 光猫 lan1取消全部绑定,光猫绑定设置哪里 48/48 41/41 这样就是划, openwrt 就是eth1.48 eth1.41
-
 - **⚙️ 路由器配置**：wan口上网用vlan就是eth1.3，新建iptv口不用vlan，设置就是eth1，iptv口为br-iptv(dhcp模式)，桥接eth2,机顶盒接端口3就是桥接br-iptv网络,可以正常使用
 - **🔐 鉴权设置**：由于实测移动iptv不鉴权，所以没有针对设置hostname、mac地址、Vendor class identifier设置
 
@@ -499,7 +503,7 @@ server {
         proxy_read_timeout 60s;
   
         # 直播核心设置：关缓冲
-        proxy_buffering off;    
+        proxy_buffering off;  
         proxy_cache off;
     }
 }
