@@ -134,7 +134,7 @@ ENABLE_EXTERNAL_M3U_MERGE = True  # 是否合并外部 M3U 到所有 M3U 文件 
 - ✅ 按 `group-title` 过滤提取指定分组的频道
 - ✅ 自动应用黑名单过滤规则
 - ✅ 支持 Nginx 代理（如果设置了 `NGINX_PROXY_PREFIX`，外部频道的 URL 和 Logo 会自动通过代理）
-- ✅ 智能排序：如果外部分组在 `GROUP_OUTPUT_ORDER` 中，会按顺序输出；否则会添加到 M3U 文件末尾
+- ✅ 智能排序：如果外部分组在 `GROUP_OUTPUT_ORDER` 中，会按顺序输出；否则会添加到 M3U 文件末尾,同时应用分组内部排序
 - ✅ 合并到所有生成的 M3U 文件（tv.m3u、tv2.m3u、ku9.m3u、 ）
 
 **⚠️ 注意事项**：
