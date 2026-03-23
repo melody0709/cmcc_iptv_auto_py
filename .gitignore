@@ -1,0 +1,15 @@
+backup/
+update_map.py
+ku91.m3u
+ku9.php
+aptv.m3u
+tv.m3u
+tv2.m3u
+ku9.m3u
+t.xml
+t.xml.gz
+
+external_m3u_cache.m3u
+*.log
+*.bak
+config/myconfig.json

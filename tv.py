@@ -21,20 +21,23 @@ if sys.stdout.encoding != 'utf-8':
 
 # ===================== 配置加载区域 =====================
 
-# 配置文件路径（仅保留路径常量，具体业务配置统一从 JSON 加载）
+# 只保留配置文件入口，业务参数统一从 JSON 读取，避免与代码重复维护。
 CONFIG_FILE = "config/config.json"
 MY_CONFIG_FILE = "config/myconfig.json"
 
-def _read_json_dict_quiet(file_path):
-    """静默读取 JSON 对象，失败时返回空字典。"""
-    if not os.path.exists(file_path):
-        return {}
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+# 运行时配置白名单与默认值，在 initialize_configuration 中根据 config.json 生成。
+DEFAULT_CONFIG = {}
+CONFIGURABLE_KEYS = set()
+
+# 派生/缓存变量使用安全初值，避免导入阶段出现未定义访问。
+REPLACEMENT_IP_NORM = ""
+REPLACEMENT_IP_TV_NORM = ""
+CATCHUP_SOURCE_PREFIX_NORM = ""
+NGINX_PROXY_PREFIX_NORM = ""
+XML_GZ_FILENAME = ""
+BLACKLIST_TITLE_SET = set()
+BLACKLIST_CODE_SET = set()
+BLACKLIST_ZTEURL_SET = set()
 
 # 🚀 性能优化：预编译正则表达式
 CCTV_PATTERN = re.compile(r'CCTV-(\d+)')  # 匹配CCTV-数字模式
@@ -44,69 +47,49 @@ TVG_ID_CLEAN_PATTERN = re.compile(r'[_\s]*(高清|超清|4K)[_\s]*')  # 清理tv
 SPACE_DASH_PATTERN = re.compile(r'\s+-\s+')  # 匹配空格-空格模式
 MULTI_SPACE_PATTERN = re.compile(r'\s+')  # 匹配多个空格
 
-# 可配置项白名单（集中维护，减少重复）
-CONFIG_KEYS = (
-    "IS_HWURL",
-    "EPG_DOWNLOAD_RETRY_COUNT",
-    "EPG_DOWNLOAD_RETRY_DELAY",
-    "EPG_DOWNLOAD_TIMEOUT",
-    "TV_M3U_FILENAME",
-    "TV2_M3U_FILENAME",
-    "KU9_M3U_FILENAME",
-    "APTV_M3U_FILENAME",
-    "XML_FILENAME",
-    "REPLACEMENT_IP",
-    "REPLACEMENT_IP_TV",
-    "CATCHUP_SOURCE_PREFIX",
-    "NGINX_PROXY_PREFIX",
-    "ENABLE_NGINX_PROXY_FOR_TV",
-    "JSON_URL",
-    "M3U_EPG_URL",
-    "EPG_BASE_URLS",
-    "CATCHUP_URL_TEMPLATE",
-    "CATCHUP_URL_KU9",
-    "CATCHUP_URL_APTV",
-    "CHANNEL_ORDER_FILE",
-    "CUSTOM_CHANNELS_FILE",
-    "EXTERNAL_M3U_URL",
-    "EXTERNAL_M3U_CACHE_FILE",
-    "EXTERNAL_GROUP_TITLES",
-    "ENABLE_EXTERNAL_M3U_MERGE",
-    "BLACKLIST_RULES",
-    "CHANNEL_NAME_MAP",
-    "ENABLE_EPG_DOWNLOAD",
-    "EPG_DOWNLOAD_MODE",
-    "XML_SKIP_CHANNELS_WITHOUT_EPG",
-    "GROUP_DEFINITIONS",
-    "GROUP_CLASSIFICATION_PRIORITY",
-    "GROUP_OUTPUT_ORDER",
-    "TIMEZONE_OFFSET",
-    "DATE_FORMAT",
-    "XML_GENERATOR_NAME",
-    "LOG_SEPARATOR",
-    "UNKNOWN_CHANNEL",
-    "UNKNOWN_PROGRAMME",
-    "CHANNEL_PROCESSING_LOG",
-    "EPG_STATISTICS_LOG",
-)
-
-# 外置配置默认值（单一来源）：仅从 config/config.json 读取
-DEFAULT_CONFIG = _read_json_dict_quiet(CONFIG_FILE)
-if not DEFAULT_CONFIG:
-    raise RuntimeError(f"无法读取默认配置文件: {CONFIG_FILE}")
-
-missing_default_keys = [key for key in CONFIG_KEYS if key not in DEFAULT_CONFIG]
-if missing_default_keys:
-    raise RuntimeError(
-        f"默认配置文件缺少必要键: {', '.join(missing_default_keys)}"
-    )
-
-# 明确允许被外部 JSON 覆盖的键
-CONFIGURABLE_KEYS = set(CONFIG_KEYS)
-
-# 初始化配置全局变量，避免模块加载阶段出现未定义
-for _key in CONFIG_KEYS:
-    globals()[_key] = copy.deepcopy(DEFAULT_CONFIG[_key])
+# 配置驱动变量占位（真实值由 initialize_configuration 写入）
+IS_HWURL = False
+EPG_DOWNLOAD_RETRY_COUNT = 0
+EPG_DOWNLOAD_RETRY_DELAY = 0
+EPG_DOWNLOAD_TIMEOUT = 0
+TV_M3U_FILENAME = ""
+TV2_M3U_FILENAME = ""
+KU9_M3U_FILENAME = ""
+APTV_M3U_FILENAME = ""
+XML_FILENAME = ""
+REPLACEMENT_IP = ""
+REPLACEMENT_IP_TV = ""
+CATCHUP_SOURCE_PREFIX = ""
+NGINX_PROXY_PREFIX = ""
+ENABLE_NGINX_PROXY_FOR_TV = False
+JSON_URL = ""
+M3U_EPG_URL = ""
+EPG_BASE_URLS = []
+CATCHUP_URL_TEMPLATE = ""
+CATCHUP_URL_KU9 = ""
+CATCHUP_URL_APTV = ""
+CHANNEL_ORDER_FILE = ""
+CUSTOM_CHANNELS_FILE = ""
+EXTERNAL_M3U_URL = ""
+EXTERNAL_M3U_CACHE_FILE = ""
+EXTERNAL_GROUP_TITLES = {}
+ENABLE_EXTERNAL_M3U_MERGE = False
+BLACKLIST_RULES = {"title": [], "code": [], "zteurl": []}
+CHANNEL_NAME_MAP = {}
+ENABLE_EPG_DOWNLOAD = False
+EPG_DOWNLOAD_MODE = ""
+XML_SKIP_CHANNELS_WITHOUT_EPG = True
+GROUP_DEFINITIONS = {}
+GROUP_CLASSIFICATION_PRIORITY = []
+GROUP_OUTPUT_ORDER = []
+TIMEZONE_OFFSET = ""
+DATE_FORMAT = ""
+XML_GENERATOR_NAME = ""
+LOG_SEPARATOR = ""
+UNKNOWN_CHANNEL = ""
+UNKNOWN_PROGRAMME = ""
+CHANNEL_PROCESSING_LOG = ""
+EPG_STATISTICS_LOG = ""
 
 # 规范化配置（程序内部使用）
 def normalize_url(url, trailing_slash='keep'):
@@ -240,16 +223,19 @@ def recompute_derived_config():
     XML_GZ_FILENAME = XML_FILENAME + ".gz"
 
 def initialize_configuration():
-    """初始化配置：默认值 -> config.json -> myconfig.json。"""
-    merged_config = copy.deepcopy(DEFAULT_CONFIG)
-    loaded_files = []
+    """初始化配置：config.json -> myconfig.json。"""
+    global DEFAULT_CONFIG
+    global CONFIGURABLE_KEYS
 
     base_config = load_json_config_file(CONFIG_FILE)
-    if base_config is not None:
-        merged_config = deep_merge_dict(merged_config, base_config)
-        loaded_files.append(CONFIG_FILE)
-    else:
-        print(f"提示: 未读取到 {CONFIG_FILE}，使用内置默认配置。")
+    if base_config is None:
+        print(f"错误: 必需配置文件不存在或无效: {CONFIG_FILE}")
+        sys.exit(1)
+
+    DEFAULT_CONFIG = copy.deepcopy(base_config)
+    CONFIGURABLE_KEYS = set(DEFAULT_CONFIG.keys())
+    merged_config = copy.deepcopy(DEFAULT_CONFIG)
+    loaded_files = [CONFIG_FILE]
 
     local_config = load_json_config_file(MY_CONFIG_FILE)
     if local_config is not None:
@@ -259,13 +245,7 @@ def initialize_configuration():
     apply_config_overrides(merged_config)
     recompute_derived_config()
 
-    if loaded_files:
-        print(f"配置加载完成，生效优先级: {' -> '.join(loaded_files)}")
-    else:
-        print("配置加载完成，当前使用内置默认配置。")
-
-# 初始派生值（若 main 中加载了外部配置会再次重算）
-recompute_derived_config()
+    print(f"配置加载完成，生效优先级: {' -> '.join(loaded_files)}")
 
 def clean_tvg_id(title):
     """清理频道标题，生成标准的 tvg-id"""
@@ -857,8 +837,11 @@ def _build_xmltv_tree(channels_for_xml, all_schedules):
                         title.text = schedule.get("title", UNKNOWN_PROGRAMME)
     return root, stats
 
-def _write_epg_files_and_stats(root, stats, output_file=XML_FILENAME):
+def _write_epg_files_and_stats(root, stats, output_file=None):
     """(Helper) 将XML树写入文件，压缩并记录统计信息。"""
+    if output_file is None:
+        output_file = XML_FILENAME
+
     xml_str = minidom.parseString(ET.tostring(root, encoding='utf-8')).toprettyxml(indent="  ")
     
     # 写入XML文件
@@ -911,7 +894,10 @@ def _write_epg_files_and_stats(root, stats, output_file=XML_FILENAME):
     print(f"\n详细统计已保存到: {os.path.abspath(EPG_STATISTICS_LOG)}")
     print(LOG_SEPARATOR)
 
-def download_and_save_all_schedules(channels_for_xml, output_file=XML_FILENAME):
+def download_and_save_all_schedules(channels_for_xml, output_file=None):
+    if output_file is None:
+        output_file = XML_FILENAME
+
     # 1. 并行下载EPG数据
     all_schedules = _download_epg_data_parallel(channels_for_xml)
     

@@ -2,7 +2,8 @@
 
 全流程自动化的广东移动IPTV频道列表和EPG节目单抓取工具，支持频道分组、黑名单过滤、自定义频道合并、分组排序、回看功能等。
 
-**版本日期**: 2026.02.08
+**版本日期**: 2026.03.23
+**项目版本**: v2026.3.23
 
 ### 更新:自定义区域添加  IS_HWURL = False 开关
 
@@ -19,9 +20,9 @@
 - **🗂️ 智能频道分组**：自动将频道分类为央视、央视特色、广东、卫视、少儿、CGTN、华数咪咕、超清4k、广东地方台、其他等分组
 - **🔄 频道去重**：自动去除重复频道，多清晰度的剔除了标清频道，只保留高清/超清/4k版本
 - **🚫 黑名单过滤**：支持按标题关键词、频道代码(code)或播放链接(zteurl)过滤频道
-- **➕ 自定义频道合并**：通过 `custom_channels.json` 添加自定义频道
+- **➕ 自定义频道合并**：通过 `config/custom_channels.json` 添加自定义频道
 - **🔗 外部 M3U 合并**：支持从外部 M3U 源下载并合并指定分组的频道（如粤语频道、体育频道等），自动应用黑名单过滤和 Nginx 代理
-- **📊 分组排序**：通过 `channel_order.json` 自定义各分组内频道的排序
+- **📊 分组排序**：通过 `config/channel_order.json` 自定义各分组内频道的排序
 - **🏷️ 频道名称映射**：支持频道名称映射（如 "CCTV-3高清" → "CCTV-3综艺"），只修改最后名字，tvg-id tvg-name 适配不影响EPG对齐
 
 ### 📋 M3U文件生成
@@ -43,7 +44,7 @@
 - **📦 生成文件**：
   - `t.xml`：XML格式的EPG节目单
   - `t.xml.gz`：压缩后的EPG文件
-  - `epg_statistics.log`：EPG下载统计日志
+  - `log/epg_statistics.log`：EPG下载统计日志
 
 ### ⏪ 回看功能
 
@@ -56,30 +57,37 @@
 
 ### 📝 日志文件
 
-- **channel_processing.log**：频道处理日志，记录去重、改名、黑名单过滤等操作
-- **epg_statistics.log**：EPG下载和合成统计信息
+- **log/channel_processing.log**：频道处理日志，记录去重、改名、黑名单过滤等操作
+- **log/epg_statistics.log**：EPG下载和合成统计信息
 
 ## ⚙️ 配置说明
 
+脚本现在按以下优先级加载配置：
+
+1. `config/config.json`（仓库默认配置，可提交到 GitHub）
+2. `config/myconfig.json`（本地覆盖配置，优先级更高，不提交）
+
+如果 `config/myconfig.json` 中存在同名配置项，会覆盖 `config/config.json`。
+
 ### 基本配置
 
-在 `tv.py` 文件顶部修改以下配置：
+在 `config/config.json` 或 `config/myconfig.json` 中修改以下配置：
 
-```python
+```json
 # UDPXY地址（组播转单播）
-REPLACEMENT_IP = "http://c.top:7088/udp"
+"REPLACEMENT_IP": "http://c.top:7088/udp",
 
 # ⏪ 回看源前缀，暂时是中兴平台的回看格式，移动都适用，华为的回看频道参数并没有实现，但是华为盒子的也能用中兴格式的
-CATCHUP_SOURCE_PREFIX = "http://183.235.162.80:6610/190000002005"
+"CATCHUP_SOURCE_PREFIX": "http://183.235.162.80:6610/190000002005",
 
 # 🌐 Nginx代理前缀（用于外网访问）默认为空 ""，只在局域网生效
-NGINX_PROXY_PREFIX = "http://c.top:7077"
+"NGINX_PROXY_PREFIX": "http://c.top:7077",
 
 # JSON数据源地址
-JSON_URL = "http://183.235.16.92:8082/epg/api/custom/getAllChannel.json"
+"JSON_URL": "http://183.235.16.92:8082/epg/api/custom/getAllChannel.json",
 
 # 📺 EPG下载源（默认为两个地址，可以删除一个）
-EPG_BASE_URLS = [
+"EPG_BASE_URLS": [
     "http://183.235.16.92:8082/epg/api/channel/",
     "http://183.235.11.39:8082/epg/api/channel/"
 ]
@@ -87,39 +95,39 @@ EPG_BASE_URLS = [
 
 ### ⏪ 回看模板配置
 
-```python
+```json
 # 标准回看模板（OK影视等）
-CATCHUP_URL_TEMPLATE = "{prefix}/{ztecode}/index.m3u8?starttime=${{utc:yyyyMMddHHmmss}}&endtime=${{utcend:yyyyMMddHHmmss}}"
+"CATCHUP_URL_TEMPLATE": "{prefix}/{ztecode}/index.m3u8?starttime=${{utc:yyyyMMddHHmmss}}&endtime=${{utcend:yyyyMMddHHmmss}}",
 
 # KU9回看模板（酷9最新版）
-CATCHUP_URL_KU9 = "{prefix}/{ztecode}/index.m3u8?starttime=${{(b)yyyyMMddHHmmss|UTC}}&endtime=${{(e)yyyyMMddHHmmss|UTC}}"
+"CATCHUP_URL_KU9": "{prefix}/{ztecode}/index.m3u8?starttime=${{(b)yyyyMMddHHmmss|UTC}}&endtime=${{(e)yyyyMMddHHmmss|UTC}}",
 
 #  添加APTV回看模板 (新增)
-CATCHUP_URL_APTV = "{prefix}/{ztecode}/index.m3u8?starttime=${{(b)yyyyMMddHHmmss:utc}}&endtime=${{(e)yyyyMMddHHmmss:utc}}"
+"CATCHUP_URL_APTV": "{prefix}/{ztecode}/index.m3u8?starttime=${{(b)yyyyMMddHHmmss:utc}}&endtime=${{(e)yyyyMMddHHmmss:utc}}"
 ```
 
 ### 📺 EPG配置
 
-```python
+```json
 # EPG下载开关
-ENABLE_EPG_DOWNLOAD = True  # True-启用, False-禁用
+"ENABLE_EPG_DOWNLOAD": true,
 
 # EPG下载模式
-EPG_DOWNLOAD_MODE = "M3U_ONLY"  # "M3U_ONLY" 或 "ALL"
+"EPG_DOWNLOAD_MODE": "M3U_ONLY",
 
 # EPG合成模式
-XML_SKIP_CHANNELS_WITHOUT_EPG = True  # True-跳过无EPG的频道, False-保留频道标签
+"XML_SKIP_CHANNELS_WITHOUT_EPG": true
 ```
 
 ### 🔗 外部 M3U 合并配置
 
 支持从外部 M3U 源下载并合并指定分组的频道到生成的 M3U 文件中，可以用于补充本地频道列表中没有的频道（如粤语频道、冰茶体育）。
 
-```python
+```json
 # 外部 M3U 合并配置
-EXTERNAL_M3U_URL = "https://bc.188766.xyz/?ip=&mishitong=true&mima=mianfeibuhuaqian&json=true"  # 外部 M3U 下载链接
-EXTERNAL_GROUP_TITLES = ["粤语频道"]  # 要提取的 group-title 列表，例如: ["冰茶体育", "粤语频道"]
-ENABLE_EXTERNAL_M3U_MERGE = True  # 是否合并外部 M3U 到所有 M3U 文件 (True/False)
+"EXTERNAL_M3U_URL": "https://bc.188766.xyz/?ip=&mishitong=true&mima=mianfeibuhuaqian&json=true",
+"EXTERNAL_GROUP_TITLES": ["粤语频道"],
+"ENABLE_EXTERNAL_M3U_MERGE": true
 ```
 
 **配置说明**：
@@ -146,8 +154,8 @@ ENABLE_EXTERNAL_M3U_MERGE = True  # 是否合并外部 M3U 到所有 M3U 文件 
 
 ### 🚫 黑名单配置
 
-```python
-BLACKLIST_RULES = {
+```json
+"BLACKLIST_RULES": {
     "title": ["测试频道", "购物", "导视", "百视通", "指南", "精选频道"],
     "code": [
         # 添加要过滤的频道代码
@@ -158,9 +166,23 @@ BLACKLIST_RULES = {
 }
 ```
 
+### 本地覆盖示例（推荐）
+
+你可以只在 `config/myconfig.json` 放差异项，例如：
+
+```json
+{
+  "IS_HWURL": false,
+  "REPLACEMENT_IP": "http://your-udpxy:7088/udp",
+  "ENABLE_EPG_DOWNLOAD": true
+}
+```
+
+说明：`config/myconfig.json` 中未出现的键会继续使用 `config/config.json` 的值。
+
 ## 📋 配置文件
 
-### custom_channels.json
+### config/custom_channels.json
 
 自定义频道配置文件，格式示例：
 
@@ -182,7 +204,7 @@ BLACKLIST_RULES = {
 
 **⚠️ 注意**：如果自定义了新的分组，需要在 `tv.py` 的 `GROUP_DEFINITIONS` 和 `GROUP_OUTPUT_ORDER` 中添加对应的分组名称。
 
-### channel_order.json
+### config/channel_order.json
 
 频道排序配置文件，生成的m3u会优先按此列表进行排序，格式示例：
 
@@ -232,8 +254,8 @@ python tv.py
 你的KU9回看URL模板是 {prefix}/{ztecode}/index.m3u8?starttime=${{(b)yyyyMMddHHmmss|UTC}}&endtime=${{(e)yyyyMMddHHmmss|UTC}}
 EPG下载开关: 启用
 EPG下载配置: 重试3次, 超时15秒, 间隔2秒
-成功加载频道排序文件: channel_order.json
-成功加载自定义频道文件: custom_channels.json
+成功加载频道排序文件: config/channel_order.json
+成功加载自定义频道文件: config/custom_channels.json
 自定义频道配置: ['广东', '广东地方台']
   分组 '广东' 有 5 个频道
   分组 '广东地方台' 有 27 个频道
@@ -256,7 +278,7 @@ EPG下载配置: 重试3次, 超时15秒, 间隔2秒
 成功生成 191 个频道
 单播地址列表: \\DS920\web\IPTV\cmcc_iptv_auto_py\tv2.m3u
 KU9回看参数列表: \\DS920\web\IPTV\cmcc_iptv_auto_py\ku9.m3u
-已生成处理日志: \\DS920\web\IPTV\cmcc_iptv_auto_py\channel_processing.log
+已生成处理日志: \\DS920\web\IPTV\cmcc_iptv_auto_py\log\channel_processing.log
 
 开始下载节目单...
 EPG 模式: M3U_ONLY (仅下载和合成 M3U 中的频道)
@@ -278,7 +300,7 @@ EPG 合成统计
    - 总共合成了 11731 个节目条目
    - 已跳过 15 个没有节目数据的频道
 
-详细统计已保存到: \\DS920\web\IPTV\cmcc_iptv_auto_py\epg_statistics.log
+详细统计已保存到: \\DS920\web\IPTV\cmcc_iptv_auto_py\log\epg_statistics.log
 ```
 
 ## 📡 网络环境配置
@@ -620,7 +642,7 @@ crontab -e
 
 - **🌐 同城移动大局域网访问正常**：多套房子实现共享，鉴于上传带宽40mbps，正常只支持外网4路8m码率的
 - **📺 EPG数据完整**：大部分频道有明天的epg，网上的基本都是当天的，回看正常，只针对酷9最新版本
-- **🏘️ 本地台支持**：缺失大部分广东本地台的ztecode、code，因为默认json都不带本地台，需要通过 `custom_channels.json` 手动添加
+- **🏘️ 本地台支持**：缺失大部分广东本地台的ztecode、code，因为默认json都不带本地台，需要通过 `config/custom_channels.json` 手动添加
 
 ### 播放器效果截图
 
@@ -641,7 +663,7 @@ crontab -e
 ## ⚠️ 注意事项
 
 1. **🌐 网络访问**：脚本需要能够访问 `183.235.0.0/16` 网段，必须通过IPTV接口
-2. **📋 频道数据**：默认JSON可能不包含所有本地台，需要通过 `custom_channels.json` 手动添加
+2. **📋 频道数据**：默认JSON可能不包含所有本地台，需要通过 `config/custom_channels.json` 手动添加
 3. **⏰ 回看时间**：回看使用UTC时间
 4. **📺 EPG数据**：大部分频道有次日的EPG数据，比网上常见的EPG源更完整
 5. **⏪ 额外主json**：[http://183.235.16.92:8082/epg/api/getAllChannel.json](http://183.235.16.92:8082/epg/api/getAllChannel.json) 这个地址包含大量地方台，但是近100个失效，暂时不采用，可以作为自定义参考
@@ -650,8 +672,8 @@ crontab -e
 
 如果脚本运行出现问题，可以：
 
-1. 📝 查看 `channel_processing.log` 了解频道处理详情
-2. 📊 查看 `epg_statistics.log` 了解EPG下载情况
+1. 📝 查看 `log/channel_processing.log` 了解频道处理详情
+2. 📊 查看 `log/epg_statistics.log` 了解EPG下载情况
 3. 🔍 检查网络连接和路由配置
 4. 🤖 使用AI工具分析错误信息
 
