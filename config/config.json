@@ -1,176 +1,22 @@
 {
   "IS_HWURL": true,
-  "EPG_DOWNLOAD_RETRY_COUNT": 3,
-  "EPG_DOWNLOAD_RETRY_DELAY": 2,
-  "EPG_DOWNLOAD_TIMEOUT": 15,
-  "TV_M3U_FILENAME": "tv.m3u",
-  "TV2_M3U_FILENAME": "tv2.m3u",
-  "KU9_M3U_FILENAME": "ku9.m3u",
-  "APTV_M3U_FILENAME": "aptv.m3u",
-  "XML_FILENAME": "t.xml",
   "REPLACEMENT_IP": "http://c.cc.top:7088/udp",
   "REPLACEMENT_IP_TV": "http://10.10.10.1:5140/udp",
-  "CATCHUP_SOURCE_PREFIX": "http://183.235.162.80:6610/190000002005",
-  "NGINX_PROXY_PREFIX": "",
-  "ENABLE_NGINX_PROXY_FOR_TV": false,
   "JSON_URL": "http://183.235.16.92:8082/epg/api/custom/getAllChannel.json",
   "M3U_EPG_URL": "http://c.cc.top:6789/t.xml",
+  "CATCHUP_SOURCE_PREFIX": "http://183.235.162.80:6610/190000002005",
   "EPG_BASE_URLS": [
     "http://183.235.16.92:8082/epg/api/channel/",
     "http://183.235.11.39:8082/epg/api/channel/"
   ],
-  "CATCHUP_URL_TEMPLATE": "{prefix}/{ztecode}/index.m3u8?starttime=${{utc:yyyyMMddHHmmss}}&endtime=${{utcend:yyyyMMddHHmmss}}",
-  "CATCHUP_URL_KU9": "{prefix}/{ztecode}/index.m3u8?starttime=${{(b)yyyyMMddHHmmss|UTC}}&endtime=${{(e)yyyyMMddHHmmss|UTC}}",
-  "CATCHUP_URL_APTV": "{prefix}/{ztecode}/index.m3u8?starttime=${{(b)yyyyMMddHHmmss:utc}}&endtime=${{(e)yyyyMMddHHmmss:utc}}",
-  "CHANNEL_ORDER_FILE": "config/channel_order.json",
-  "CUSTOM_CHANNELS_FILE": "config/custom_channels.json",
+  "EPG_DAY_OFFSETS": [-5, -4, -3, -2, -1, 0, 1],
+  "ENABLE_EPG_DOWNLOAD": true,
+  "EPG_DOWNLOAD_MODE": "M3U_ONLY",
+  "NGINX_PROXY_PREFIX": "",
+  "ENABLE_NGINX_PROXY_FOR_TV": false,
   "EXTERNAL_M3U_URL": "https://raw.githubusercontent.com/Jsnzkpg/Jsnzkpg/Jsnzkpg/Jsnzkpg1.m3u",
-  "EXTERNAL_M3U_CACHE_FILE": "external_m3u_cache.m3u",
   "EXTERNAL_GROUP_TITLES": {
     "🔮[三网]港澳台直播": "港澳台"
   },
-  "ENABLE_EXTERNAL_M3U_MERGE": true,
-  "BLACKLIST_RULES": {
-    "title": [
-      "测试频道",
-      "CGTN 西班牙语",
-      "CGTN 法语",
-      "CGTN 阿拉伯语",
-      "CGTN 俄语",
-      "购物",
-      "导视",
-      "百视通",
-      "指南",
-      "精选频道",
-      "移动咪咕五大联赛4K",
-      "咪咕五大联赛4K",
-      "TVB翡翠(馬來)",
-      "HOY76",
-      "HOY77",
-      "好莱坞电影",
-      "華藝中文",
-      "ROCK_Action",
-      "TNTS",
-      "镜新闻",
-      "GOOD",
-      "RHK",
-      "唐NTD",
-      "八度空间",
-      "Now直播",
-      "POPC",
-      "AXN",
-      "iQIYI",
-      "星空",
-      "博斯"
-    ],
-    "code": [
-      "02000000000000050000000000000148"
-    ],
-    "zteurl": []
-  },
-  "CHANNEL_NAME_MAP": {
-    "CCTV-1高清": "CCTV-1综合",
-    "CCTV-2高清": "CCTV-2财经",
-    "CCTV-3高清": "CCTV-3综艺",
-    "CCTV-4高清": "CCTV-4中文国际",
-    "CCTV-5高清": "CCTV-5体育",
-    "CCTV-6高清": "CCTV-6电影",
-    "CCTV-7高清": "CCTV-7国防军事",
-    "CCTV-8高清": "CCTV-8电视剧",
-    "CCTV-9高清": "CCTV-9纪录",
-    "CCTV-10高清": "CCTV-10科教",
-    "CCTV-11高清": "CCTV-11戏曲",
-    "CCTV-12高清": "CCTV-12社会与法",
-    "CCTV-13高清": "CCTV-13新闻",
-    "CCTV-14高清": "CCTV-14少儿高清",
-    "CCTV-15高清": "CCTV-15音乐",
-    "CCTV-16高清": "CCTV-16奥林匹克",
-    "CCTV-17高清": "CCTV-17农业高清",
-    "广州新闻-测试": "广州新闻高清",
-    "广州综合-测试": "广州综合高清"
-  },
-  "ENABLE_EPG_DOWNLOAD": true,
-  "EPG_DOWNLOAD_MODE": "M3U_ONLY",
-  "XML_SKIP_CHANNELS_WITHOUT_EPG": true,
-  "GROUP_DEFINITIONS": {
-    "央视": [
-      "CCTV"
-    ],
-    "央视特色": [
-      "兵器科技",
-      "风云",
-      "第一剧场",
-      "世界地理",
-      "央视",
-      "卫生健康",
-      "怀旧",
-      "女性",
-      "高尔夫",
-      "金鹰纪实",
-      "CGTN"
-    ],
-    "广东": [
-      "广东",
-      "大湾区",
-      "经济科教",
-      "南方",
-      "岭南",
-      "现代教育",
-      "移动频道"
-    ],
-    "卫视": [
-      "卫视"
-    ],
-    "少儿": [
-      "少儿",
-      "卡通",
-      "动画",
-      "教育"
-    ],
-    "华数咪咕": [
-      "爱",
-      "睛彩",
-      "IPTV",
-      "咪咕",
-      "热播",
-      "经典",
-      "魅力"
-    ],
-    "超清4k": [
-      "超清",
-      "4k",
-      "4K"
-    ],
-    "广东地方台": [],
-    "其他": []
-  },
-  "GROUP_CLASSIFICATION_PRIORITY": [
-    "少儿",
-    "超清4k",
-    "央视",
-    "央视特色",
-    "广东",
-    "卫视",
-    "华数咪咕"
-  ],
-  "GROUP_OUTPUT_ORDER": [
-    "央视",
-    "港澳台",
-    "广东",
-    "央视特色",
-    "少儿",
-    "卫视",
-    "华数咪咕",
-    "超清4k",
-    "其他",
-    "广东地方台"
-  ],
-  "TIMEZONE_OFFSET": "+0800",
-  "DATE_FORMAT": "%Y%m%d",
-  "XML_GENERATOR_NAME": "Custom EPG Generator",
-  "LOG_SEPARATOR": "==================================================",
-  "UNKNOWN_CHANNEL": "Unknown",
-  "UNKNOWN_PROGRAMME": "Unknown Programme",
-  "CHANNEL_PROCESSING_LOG": "log/channel_processing.log",
-  "EPG_STATISTICS_LOG": "log/epg_statistics.log"
+  "ENABLE_EXTERNAL_M3U_MERGE": true
 }

@@ -8,7 +8,6 @@ import sys
 import gzip
 import time 
 import threading 
-import copy
 from urllib.parse import urljoin, urlparse
 from datetime import datetime, timedelta
 import xml.etree.ElementTree as ET
@@ -19,25 +18,160 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-# ===================== 配置加载区域 =====================
+# ===================== 自定义配置区域 =====================
 
-# 只保留配置文件入口，业务参数统一从 JSON 读取，避免与代码重复维护。
-CONFIG_FILE = "config/config.json"
-MY_CONFIG_FILE = "config/myconfig.json"
+# 是否优先使用 hwurl (Huawei)
+# True  = 优先提取 hwurl (如果 hwurl 为空则回退到 zteurl)
+# False = 优先提取 zteurl (默认，如果 zteurl 为空则回退到 hwurl)
+# 注意：无论此开关如何，回看代码(ztecode)始终使用 params["ztecode"]
+IS_HWURL = True  
 
-# 运行时配置白名单与默认值，在 initialize_configuration 中根据 config.json 生成。
-DEFAULT_CONFIG = {}
-CONFIGURABLE_KEYS = set()
+#  EPG 下载重试配置
+EPG_DOWNLOAD_RETRY_COUNT = 3  # 重试次数
+EPG_DOWNLOAD_RETRY_DELAY = 2  # 重试间隔（秒）
+EPG_DOWNLOAD_TIMEOUT = 15     # 单个请求超时时间（秒）
 
-# 派生/缓存变量使用安全初值，避免导入阶段出现未定义访问。
-REPLACEMENT_IP_NORM = ""
-REPLACEMENT_IP_TV_NORM = ""
-CATCHUP_SOURCE_PREFIX_NORM = ""
-NGINX_PROXY_PREFIX_NORM = ""
-XML_GZ_FILENAME = ""
+# 在这里修改输出文件名（保持默认即可使用原始文件名）
+TV_M3U_FILENAME = "tv.m3u"        # 组播地址列表文件
+TV2_M3U_FILENAME = "tv2.m3u"      # 转单播地址列表文件
+KU9_M3U_FILENAME = "ku9.m3u"      # KU9回看参数格式文件
+APTV_M3U_FILENAME = "aptv.m3u"    # APTV回看参数格式文件 (新增)
+XML_FILENAME = "t.xml"            # XML节目单文件
+REPLACEMENT_IP = "http://c.cc.top:7088/udp"  # UDPXY地址，
+REPLACEMENT_IP_TV = ""  # tv.m3u 专用的 UDPXY 地址（默认为空，使用原始地址）
+CATCHUP_SOURCE_PREFIX = "http://183.235.162.80:6610/190000002005"  # 回看源前缀，
+NGINX_PROXY_PREFIX = ""  # 针对外网播放的nginx代理
+ENABLE_NGINX_PROXY_FOR_TV = False  # tv.m3u 是否使用 NGINX_PROXY_PREFIX 代理（默认 False）
+JSON_URL = "http://183.235.16.92:8082/epg/api/custom/getAllChannel.json" # JSON 文件下载 URL  这个地址有晴彩
+
+#  EPG 地址配置 - 可自定义修改
+M3U_EPG_URL = "https://gitee.com/taksssss/tv/raw/main/epg/51zmte1.xml.gz"  # 请修改为你的实际 EPG 地址
+# (新增) EPG 下载源地址 (可以配置多个, 任务会自动分配)
+EPG_BASE_URLS = [
+    "http://183.235.16.92:8082/epg/api/channel/",
+    "http://183.235.11.39:8082/epg/api/channel/"
+]
+# EPG 下载日期偏移（相对于今天，单位：天）
+DEFAULT_EPG_DAY_OFFSETS = [-5, -4, -3, -2, -1, 0, 1]
+EPG_DAY_OFFSETS = DEFAULT_EPG_DAY_OFFSETS.copy()
+#  回看参数配置 - 可自定义修改
+CATCHUP_URL_TEMPLATE = "{prefix}/{ztecode}/index.m3u8?starttime=${{utc:yyyyMMddHHmmss}}&endtime=${{utcend:yyyyMMddHHmmss}}"
+#  添加KU9回看模板
+CATCHUP_URL_KU9 = "{prefix}/{ztecode}/index.m3u8?starttime=${{(b)yyyyMMddHHmmss|UTC}}&endtime=${{(e)yyyyMMddHHmmss|UTC}}"
+#  添加APTV回看模板 (新增)
+CATCHUP_URL_APTV = "{prefix}/{ztecode}/index.m3u8?starttime=${{(b)yyyyMMddHHmmss:utc}}&endtime=${{(e)yyyyMMddHHmmss:utc}}"
+
+
+# 自定义配置文件
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_DIR = os.path.join(BASE_DIR, "config")
+COMMON_CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
+USER_CONFIG_FILE = os.path.join(CONFIG_DIR, "myconfig.json")
+CHANNEL_ORDER_FILE = os.path.join(CONFIG_DIR, "channel_order.json")        # 频道排序文件
+CUSTOM_CHANNELS_FILE = os.path.join(CONFIG_DIR, "custom_channels.json")    # 自定义频道文件
+
+# 外部 M3U 合并配置
+EXTERNAL_M3U_URL = "https://raw.githubusercontent.com/Jsnzkpg/Jsnzkpg/Jsnzkpg/Jsnzkpg1.m3u"  # 外部  M3U 下载链接,部分频道可能需要科学上网
+# 要提取的 group-title 列表，例如: ["🔮[主用]港澳台直播", "粤语频道"],粤语频道播放需要科学上网
+# 支持列表格式 ["A", "B"]，也支持频道盖帽映射的字典格式 {"A":"新A", "B":"新B"}
+EXTERNAL_GROUP_TITLES = {
+    "🔮[主用]港澳台直播": "港澳台"
+}
+ENABLE_EXTERNAL_M3U_MERGE = True  # 是否合并外部 M3U 到所有 M3U 文件 (True/False)
+
+#  扩展黑名单配置 - 支持按 title、code 或 zteurl 过滤
+BLACKLIST_RULES = {
+    "title": ["测试频道", "购物", "导视", "百视通", "指南", "精选频道","移动咪咕五大联赛4K","咪咕五大联赛4K","TVB翡翠(馬來)","HOY76","HOY77","好莱坞电影","華藝中文","ROCK_Action","TNTS","镜新闻", "GOOD","RHK", "唐NTD","八度空间","Now直播","POPC","AXN","iQIYI","星空","博斯"],
+    "code": [
+             # "02000006000000052022060699000003",
+    ],
+    "zteurl": [
+              # "rtp://239.21.0.137:3892",
+    ]
+}
+
+# 🚀 性能优化：转换为集合（运行时根据配置刷新）
 BLACKLIST_TITLE_SET = set()
 BLACKLIST_CODE_SET = set()
 BLACKLIST_ZTEURL_SET = set()
+
+# 频道名称映射（将高清频道映射到标准名称）
+CHANNEL_NAME_MAP = {
+    "CCTV-1高清": "CCTV-1综合",
+    "CCTV-2高清": "CCTV-2财经",
+    "CCTV-3高清": "CCTV-3综艺",
+    "CCTV-4高清": "CCTV-4中文国际",
+    "CCTV-5高清": "CCTV-5体育",
+    "CCTV-6高清": "CCTV-6电影",
+    "CCTV-7高清": "CCTV-7国防军事",
+    "CCTV-8高清": "CCTV-8电视剧",
+    "CCTV-9高清": "CCTV-9纪录",
+    "CCTV-10高清": "CCTV-10科教",
+    "CCTV-11高清": "CCTV-11戏曲",
+    "CCTV-12高清": "CCTV-12社会与法",
+    "CCTV-13高清": "CCTV-13新闻",
+    "CCTV-14高清": "CCTV-14少儿高清",
+    "CCTV-15高清": "CCTV-15音乐",
+    "CCTV-16高清": "CCTV-16奥林匹克",
+    "CCTV-17高清": "CCTV-17农业高清",
+    "广州新闻-测试": "广州新闻高清",
+    "广州综合-测试": "广州综合高清"
+}
+
+# EPG 下载开关:
+ENABLE_EPG_DOWNLOAD = True  # True - 启用EPG下载和生成  False - 跳过EPG下载
+
+# EPG 下载模式:
+EPG_DOWNLOAD_MODE = "M3U_ONLY"  # 默认修改为 "M3U_ONLY"  "M3U_ONLY"  - 仅下载和合成 M3U 文件中实际包含的频道 )  "ALL" - 下载和合成所有可用频道（包括被 M3U 过滤掉的)
+
+# EPG 合成模式: 
+# True  - (推荐) 仅当频道有节目数据时才将其写入 XML。这可能导致播放器无法映射频道名称。方便iptool整合  False - (不推荐) 即使频道没有节目数据也写入 <channel> 标签 (用于频道名称/图标映射)，只是不包含 <programme> 标签。
+XML_SKIP_CHANNELS_WITHOUT_EPG = True # 默认为 True
+
+# 1. 定义所有分组和它们的关键字 (这里的顺序不重要)
+GROUP_DEFINITIONS = {
+    "央视": ["CCTV"],
+    "央视特色": ["兵器科技", "风云", "第一剧场", "世界地理", "央视", "卫生健康", "怀旧", "女性", "高尔夫", "金鹰纪实"],
+    "广东": ["广东", "大湾区", "经济科教", "南方", "岭南", "现代教育", "移动频道"],
+    "卫视": ["卫视"],
+    "少儿": ["少儿", "卡通", "动画", "教育"],
+    "CGTN": ["CGTN"],
+    "华数咪咕": ["爱", "睛彩", "IPTV", "咪咕", "热播", "经典", "魅力"],
+    "超清4k": ["超清", "4k", "4K"],
+    "广东地方台": [],  # 自定义频道分组，没有关键字
+    "其他": []          # 保底分组，没有关键字
+}
+
+# 2. 定义分类逻辑的 *优先级* (e.g., "少儿" 必须在 "央视" 之前) 这里的顺序决定一个频道被分到哪个组
+GROUP_CLASSIFICATION_PRIORITY = [
+    "少儿",       # 必须在 "央视" 和 "广东" 之前,不然cctv14少儿 会分到央视,确保每个分组只有一个频道,不会有重复频道
+    "超清4k",   # 必须在 "央视" 之前，否则CCTV-4K会被分到央视
+    "央视",
+    "央视特色",
+    "广东",
+    "CGTN",
+    "卫视",
+    "华数咪咕",
+    # "广东地方台" 和 "其他" 没有关键字，不需要在这里
+]
+
+# 3. 定义 M3U 和 XML 文件中的 *输出顺序* (你可以随意排列这里的顺序，"少儿" 重排序)
+GROUP_OUTPUT_ORDER = [
+    "央视",
+    "港澳台",
+    "广东",
+    "央视特色",
+    "少儿",  # <--- "少儿" 重排序
+    "卫视",
+    "华数咪咕",
+    "CGTN",
+    "超清4k",
+    "其他",
+    "广东地方台"
+]
+
+# 自动生成的压缩文件名（基于XML文件名）
+XML_GZ_FILENAME = XML_FILENAME + ".gz"
 
 # 🚀 性能优化：预编译正则表达式
 CCTV_PATTERN = re.compile(r'CCTV-(\d+)')  # 匹配CCTV-数字模式
@@ -47,49 +181,16 @@ TVG_ID_CLEAN_PATTERN = re.compile(r'[_\s]*(高清|超清|4K)[_\s]*')  # 清理tv
 SPACE_DASH_PATTERN = re.compile(r'\s+-\s+')  # 匹配空格-空格模式
 MULTI_SPACE_PATTERN = re.compile(r'\s+')  # 匹配多个空格
 
-# 配置驱动变量占位（真实值由 initialize_configuration 写入）
-IS_HWURL = False
-EPG_DOWNLOAD_RETRY_COUNT = 0
-EPG_DOWNLOAD_RETRY_DELAY = 0
-EPG_DOWNLOAD_TIMEOUT = 0
-TV_M3U_FILENAME = ""
-TV2_M3U_FILENAME = ""
-KU9_M3U_FILENAME = ""
-APTV_M3U_FILENAME = ""
-XML_FILENAME = ""
-REPLACEMENT_IP = ""
-REPLACEMENT_IP_TV = ""
-CATCHUP_SOURCE_PREFIX = ""
-NGINX_PROXY_PREFIX = ""
-ENABLE_NGINX_PROXY_FOR_TV = False
-JSON_URL = ""
-M3U_EPG_URL = ""
-EPG_BASE_URLS = []
-CATCHUP_URL_TEMPLATE = ""
-CATCHUP_URL_KU9 = ""
-CATCHUP_URL_APTV = ""
-CHANNEL_ORDER_FILE = ""
-CUSTOM_CHANNELS_FILE = ""
-EXTERNAL_M3U_URL = ""
-EXTERNAL_M3U_CACHE_FILE = ""
-EXTERNAL_GROUP_TITLES = {}
-ENABLE_EXTERNAL_M3U_MERGE = False
-BLACKLIST_RULES = {"title": [], "code": [], "zteurl": []}
-CHANNEL_NAME_MAP = {}
-ENABLE_EPG_DOWNLOAD = False
-EPG_DOWNLOAD_MODE = ""
-XML_SKIP_CHANNELS_WITHOUT_EPG = True
-GROUP_DEFINITIONS = {}
-GROUP_CLASSIFICATION_PRIORITY = []
-GROUP_OUTPUT_ORDER = []
-TIMEZONE_OFFSET = ""
-DATE_FORMAT = ""
-XML_GENERATOR_NAME = ""
-LOG_SEPARATOR = ""
-UNKNOWN_CHANNEL = ""
-UNKNOWN_PROGRAMME = ""
-CHANNEL_PROCESSING_LOG = ""
-EPG_STATISTICS_LOG = ""
+# 魔法字符串和数字提取为常量
+TIMEZONE_OFFSET = "+0800"  # 时区偏移
+DATE_FORMAT = "%Y%m%d"  # 日期格式
+XML_GENERATOR_NAME = "Custom EPG Generator"  # XML生成器名称
+LOG_SEPARATOR = "=" * 50  # 日志分隔符
+UNKNOWN_CHANNEL = "Unknown"  # 未知频道名称
+UNKNOWN_PROGRAMME = "Unknown Programme"  # 未知节目名称
+LOG_DIR = os.path.join(BASE_DIR, "log")
+CHANNEL_PROCESSING_LOG = os.path.join(LOG_DIR, "channel_processing.log")  # 频道处理日志文件名
+EPG_STATISTICS_LOG = os.path.join(LOG_DIR, "epg_statistics.log")  # EPG统计日志文件名
 
 # 规范化配置（程序内部使用）
 def normalize_url(url, trailing_slash='keep'):
@@ -140,112 +241,126 @@ def ensure_url_scheme(url, default_scheme='http'):
     else:
         return url
 
-def ensure_parent_directory(file_path):
-    """确保目标文件的父目录存在。"""
-    dir_path = os.path.dirname(file_path)
-    if dir_path:
-        os.makedirs(dir_path, exist_ok=True)
-
-def deep_merge_dict(base, override):
-    """递归合并字典：override 覆盖 base。"""
-    result = copy.deepcopy(base)
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = deep_merge_dict(result[key], value)
-        else:
-            result[key] = value
-    return result
-
 def load_json_config_file(file_path):
-    """加载 JSON 配置文件，失败时返回 None。"""
+    """读取 JSON 配置文件，失败时返回空字典。"""
     if not os.path.exists(file_path):
-        return None
+        return {}
+
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         if not isinstance(data, dict):
-            print(f"警告: 配置文件 {file_path} 顶层必须是对象(dict)，已忽略。")
-            return None
+            print(f"配置文件格式错误（应为对象）: {file_path}")
+            return {}
         return data
+    except json.JSONDecodeError as e:
+        print(f"配置文件 JSON 解析失败: {file_path} -> {e}")
+        return {}
     except Exception as e:
-        print(f"警告: 读取配置文件失败 {file_path}: {e}")
-        return None
+        print(f"读取配置文件失败: {file_path} -> {e}")
+        return {}
 
-def is_valid_config_type(value, default_value):
-    """使用默认值类型做基础校验，避免明显错误配置导致运行异常。"""
-    if isinstance(default_value, bool):
-        return isinstance(value, bool)
-    if isinstance(default_value, int):
-        return isinstance(value, int) and not isinstance(value, bool)
-    if isinstance(default_value, str):
-        return isinstance(value, str)
-    if isinstance(default_value, list):
-        return isinstance(value, list)
-    if isinstance(default_value, dict):
-        return isinstance(value, dict)
-    return True
+def normalize_epg_day_offsets(offsets):
+    """标准化 EPG_DAY_OFFSETS，非法值回退默认。"""
+    if not isinstance(offsets, list):
+        print("EPG_DAY_OFFSETS 不是列表，已回退默认值。")
+        return DEFAULT_EPG_DAY_OFFSETS.copy()
 
-def apply_config_overrides(config_data):
-    """将配置值写回同名全局变量，仅允许白名单键。"""
-    for key in CONFIGURABLE_KEYS:
-        if key in config_data:
-            default_value = DEFAULT_CONFIG[key]
-            value = config_data[key]
-            if is_valid_config_type(value, default_value):
-                globals()[key] = value
-            else:
-                print(f"警告: 配置项 {key} 类型不正确，已回退默认值。")
-                globals()[key] = copy.deepcopy(default_value)
+    normalized = []
+    for item in offsets:
+        if isinstance(item, bool):
+            continue
+        try:
+            value = int(item)
+            normalized.append(value)
+        except (TypeError, ValueError):
+            continue
 
-def recompute_derived_config():
-    """根据当前配置重算派生变量。"""
-    global REPLACEMENT_IP_NORM
-    global REPLACEMENT_IP_TV_NORM
-    global CATCHUP_SOURCE_PREFIX_NORM
-    global NGINX_PROXY_PREFIX_NORM
-    global BLACKLIST_TITLE_SET
-    global BLACKLIST_CODE_SET
-    global BLACKLIST_ZTEURL_SET
-    global XML_GZ_FILENAME
+    normalized = sorted(set(normalized))
+    if not normalized:
+        print("EPG_DAY_OFFSETS 无有效整数，已回退默认值。")
+        return DEFAULT_EPG_DAY_OFFSETS.copy()
+    return normalized
 
-    REPLACEMENT_IP_NORM = normalize_url(REPLACEMENT_IP, trailing_slash='add')
-    REPLACEMENT_IP_TV_NORM = normalize_url(REPLACEMENT_IP_TV, trailing_slash='add') if REPLACEMENT_IP_TV else ""
-    CATCHUP_SOURCE_PREFIX_NORM = normalize_url(CATCHUP_SOURCE_PREFIX, trailing_slash='remove')
-    NGINX_PROXY_PREFIX_NORM = normalize_url(NGINX_PROXY_PREFIX, trailing_slash='add')
+def load_runtime_config_overrides():
+    """按优先级加载配置：config.json -> myconfig.json。"""
+    merged = {}
 
-    blacklist_title = BLACKLIST_RULES.get("title", []) if isinstance(BLACKLIST_RULES, dict) else []
-    blacklist_code = BLACKLIST_RULES.get("code", []) if isinstance(BLACKLIST_RULES, dict) else []
-    blacklist_zteurl = BLACKLIST_RULES.get("zteurl", []) if isinstance(BLACKLIST_RULES, dict) else []
-    BLACKLIST_TITLE_SET = set(blacklist_title)
-    BLACKLIST_CODE_SET = set(blacklist_code)
-    BLACKLIST_ZTEURL_SET = set(blacklist_zteurl)
+    common_config = load_json_config_file(COMMON_CONFIG_FILE)
+    if common_config:
+        merged.update(common_config)
+        print(f"成功加载通用配置文件: {COMMON_CONFIG_FILE}")
 
-    XML_GZ_FILENAME = XML_FILENAME + ".gz"
+    user_config = load_json_config_file(USER_CONFIG_FILE)
+    if user_config:
+        merged.update(user_config)
+        print(f"成功加载个人配置文件: {USER_CONFIG_FILE}")
 
-def initialize_configuration():
-    """初始化配置：config.json -> myconfig.json。"""
-    global DEFAULT_CONFIG
-    global CONFIGURABLE_KEYS
+    return merged
 
-    base_config = load_json_config_file(CONFIG_FILE)
-    if base_config is None:
-        print(f"错误: 必需配置文件不存在或无效: {CONFIG_FILE}")
-        sys.exit(1)
+def apply_runtime_config_overrides(config):
+    """将配置应用到全局变量，未知键会被忽略。"""
+    if not isinstance(config, dict):
+        return
 
-    DEFAULT_CONFIG = copy.deepcopy(base_config)
-    CONFIGURABLE_KEYS = set(DEFAULT_CONFIG.keys())
-    merged_config = copy.deepcopy(DEFAULT_CONFIG)
-    loaded_files = [CONFIG_FILE]
+    ignored_keys = []
+    for key, value in config.items():
+        if key in globals():
+            globals()[key] = value
+        else:
+            ignored_keys.append(key)
 
-    local_config = load_json_config_file(MY_CONFIG_FILE)
-    if local_config is not None:
-        merged_config = deep_merge_dict(merged_config, local_config)
-        loaded_files.append(MY_CONFIG_FILE)
+    if ignored_keys:
+        print(f"以下配置键未被使用（已忽略）: {', '.join(ignored_keys)}")
 
-    apply_config_overrides(merged_config)
-    recompute_derived_config()
+def refresh_derived_config_values():
+    """根据当前配置刷新所有派生变量。"""
+    global EPG_DAY_OFFSETS
+    global EPG_BASE_URLS
+    global BLACKLIST_TITLE_SET, BLACKLIST_CODE_SET, BLACKLIST_ZTEURL_SET
+    global REPLACEMENT_IP_NORM, REPLACEMENT_IP_TV_NORM, CATCHUP_SOURCE_PREFIX_NORM, NGINX_PROXY_PREFIX_NORM
 
-    print(f"配置加载完成，生效优先级: {' -> '.join(loaded_files)}")
+    EPG_DAY_OFFSETS = normalize_epg_day_offsets(EPG_DAY_OFFSETS)
+
+    if not isinstance(EPG_BASE_URLS, list):
+        print("EPG_BASE_URLS 不是列表，已回退默认地址。")
+        EPG_BASE_URLS = [
+            "http://183.235.16.92:8082/epg/api/channel/",
+            "http://183.235.11.39:8082/epg/api/channel/"
+        ]
+
+    normalized_epg_base_urls = []
+    for base_url in EPG_BASE_URLS:
+        if not isinstance(base_url, str):
+            continue
+        normalized = normalize_url(base_url.strip(), trailing_slash='add')
+        if normalized:
+            normalized_epg_base_urls.append(normalized)
+    EPG_BASE_URLS = normalized_epg_base_urls
+
+    if not isinstance(BLACKLIST_RULES, dict):
+        print("BLACKLIST_RULES 不是对象，已回退为空规则。")
+        title_values = []
+        code_values = []
+        zteurl_values = []
+    else:
+        title_values = BLACKLIST_RULES.get("title", [])
+        code_values = BLACKLIST_RULES.get("code", [])
+        zteurl_values = BLACKLIST_RULES.get("zteurl", [])
+
+    BLACKLIST_TITLE_SET = set(title_values if isinstance(title_values, list) else [])
+    BLACKLIST_CODE_SET = set(code_values if isinstance(code_values, list) else [])
+    BLACKLIST_ZTEURL_SET = set(zteurl_values if isinstance(zteurl_values, list) else [])
+
+    REPLACEMENT_IP_NORM = normalize_url(str(REPLACEMENT_IP), trailing_slash='add') if REPLACEMENT_IP else ""
+    REPLACEMENT_IP_TV_NORM = normalize_url(str(REPLACEMENT_IP_TV), trailing_slash='add') if REPLACEMENT_IP_TV else ""
+    CATCHUP_SOURCE_PREFIX_NORM = normalize_url(str(CATCHUP_SOURCE_PREFIX), trailing_slash='remove') if CATCHUP_SOURCE_PREFIX else ""
+    NGINX_PROXY_PREFIX_NORM = normalize_url(str(NGINX_PROXY_PREFIX), trailing_slash='add') if NGINX_PROXY_PREFIX else ""
+
+# 启动时加载并应用配置
+RUNTIME_CONFIG = load_runtime_config_overrides()
+apply_runtime_config_overrides(RUNTIME_CONFIG)
+refresh_derived_config_values()
 
 def clean_tvg_id(title):
     """清理频道标题，生成标准的 tvg-id"""
@@ -289,18 +404,14 @@ def print_configuration():
     print(f"EPG下载开关: {'启用' if ENABLE_EPG_DOWNLOAD else '禁用'}")
     if ENABLE_EPG_DOWNLOAD:
         print(f"EPG下载配置: 重试{EPG_DOWNLOAD_RETRY_COUNT}次, 超时{EPG_DOWNLOAD_TIMEOUT}秒, 间隔{EPG_DOWNLOAD_RETRY_DELAY}秒")
+        print(f"EPG下载日期偏移: {EPG_DAY_OFFSETS}")
     print(f"外部M3U合并开关: {'启用' if ENABLE_EXTERNAL_M3U_MERGE else '禁用'}")
     if ENABLE_EXTERNAL_M3U_MERGE:
         print(f"外部M3U地址: {EXTERNAL_M3U_URL}")
         print(f"提取的分组: {', '.join(EXTERNAL_GROUP_TITLES) if EXTERNAL_GROUP_TITLES else '(未配置)'}")
 
-def download_with_retry(url, max_retries=None, timeout=None, headers=None):
+def download_with_retry(url, max_retries=EPG_DOWNLOAD_RETRY_COUNT, timeout=EPG_DOWNLOAD_TIMEOUT, headers=None):
     """ 带重试机制的下载函数"""
-    if max_retries is None:
-        max_retries = EPG_DOWNLOAD_RETRY_COUNT
-    if timeout is None:
-        timeout = EPG_DOWNLOAD_TIMEOUT
-
     for attempt in range(max_retries):
         try:
             response = requests.get(url, timeout=timeout, headers=headers)
@@ -694,25 +805,58 @@ def add_custom_channels(grouped_channels, custom_channels):
     #  返回黑名单信息和已添加的频道列表
     return grouped_channels, blacklisted_custom_channels, added_custom_channels
 
+def build_epg_download_dates(base_time, day_offsets):
+    """根据偏移列表生成去重后的下载日期列表（YYYYMMDD）。"""
+    date_list = []
+    seen = set()
+    for offset in day_offsets:
+        day = (base_time + timedelta(days=offset)).strftime(DATE_FORMAT)
+        if day in seen:
+            continue
+        seen.add(day)
+        date_list.append(day)
+    return date_list
+
+def append_schedules_without_duplicates(target_schedules, source_schedules, schedule_keys):
+    """按关键字段去重后追加节目单条目。"""
+    for schedule in source_schedules:
+        start_value = schedule.get("starttime") or schedule.get("startTime") or schedule.get("start") or ""
+        end_value = schedule.get("endtime") or schedule.get("endTime") or schedule.get("end") or ""
+        title_value = schedule.get("title") or schedule.get("name") or schedule.get("programme") or ""
+
+        key = (
+            start_value,
+            end_value,
+            title_value
+        )
+
+        # 兜底：如果关键字段都为空，使用原始对象序列化值避免整批被误去重。
+        if not any(key):
+            try:
+                key = (json.dumps(schedule, ensure_ascii=False, sort_keys=True),)
+            except TypeError:
+                key = (str(schedule),)
+
+        if key in schedule_keys:
+            continue
+        schedule_keys.add(key)
+        target_schedules.append(schedule)
+
 def download_epg_for_source(channels, base_url, total_channels, progress_counter, progress_lock):
     """
     (新增) 下载工作函数：从指定的 base_url 下载一组频道的 EPG 数据。
     在线程池中执行。
     """
     schedules_for_source = {}
-    # 优化：在函数开始时计算一次日期，避免重复计算
+    # 优化：在函数开始时计算一次日期列表，避免重复计算
     now = datetime.now()
-    current_date = now.strftime(DATE_FORMAT)
-    next_date = (now + timedelta(days=1)).strftime(DATE_FORMAT)
+    download_dates = build_epg_download_dates(now, EPG_DAY_OFFSETS)
 
     for channel in channels:
         code = channel["code"]
         
-        # 为当天和第二天生成下载URL
-        urls_for_channel = [
-            f"{base_url}{code}.json?begintime={current_date}",
-            f"{base_url}{code}.json?begintime={next_date}"
-        ]
+        # 按配置偏移生成下载URL
+        urls_for_channel = [f"{base_url}{code}.json?begintime={date_value}" for date_value in download_dates]
         
         for url in urls_for_channel:
             try:
@@ -722,9 +866,14 @@ def download_epg_for_source(channels, base_url, total_channels, progress_counter
                 if code not in schedules_for_source:
                     schedules_for_source[code] = {
                         "channel": data.get("channel", {}),
-                        "schedules": []
+                        "schedules": [],
+                        "_schedule_keys": set()
                     }
-                schedules_for_source[code]["schedules"].extend(data.get("schedules", []))
+                append_schedules_without_duplicates(
+                    schedules_for_source[code]["schedules"],
+                    data.get("schedules", []),
+                    schedules_for_source[code]["_schedule_keys"]
+                )
             except Exception as e:
                 # 在线程中打印错误，避免中断其他线程
                 # (这个 \n 会另起一行，保留错误，进度条会在下一行继续)
@@ -736,7 +885,10 @@ def download_epg_for_source(channels, base_url, total_channels, progress_counter
             count = progress_counter[0]
             percent = (count / total_channels) * 100
             print(f"  下载进度: {count}/{total_channels} 个频道 ({percent:.1f}%)", end="\r", flush=True)
-            
+
+    for code in list(schedules_for_source.keys()):
+        schedules_for_source[code].pop("_schedule_keys", None)
+
     return schedules_for_source
 
 def _download_epg_data_parallel(channels_for_xml):
@@ -837,22 +989,17 @@ def _build_xmltv_tree(channels_for_xml, all_schedules):
                         title.text = schedule.get("title", UNKNOWN_PROGRAMME)
     return root, stats
 
-def _write_epg_files_and_stats(root, stats, output_file=None):
+def _write_epg_files_and_stats(root, stats, output_file=XML_FILENAME):
     """(Helper) 将XML树写入文件，压缩并记录统计信息。"""
-    if output_file is None:
-        output_file = XML_FILENAME
-
     xml_str = minidom.parseString(ET.tostring(root, encoding='utf-8')).toprettyxml(indent="  ")
     
     # 写入XML文件
-    ensure_parent_directory(output_file)
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(xml_str)
     print(f"已保存节目单XML文件到: {os.path.abspath(output_file)}")
 
     # 优化：直接压缩内存中的字符串，避免重复读取文件
     xml_bytes = xml_str.encode('utf-8')
-    ensure_parent_directory(XML_GZ_FILENAME)
     with gzip.open(XML_GZ_FILENAME, 'wb') as f_out:
         f_out.write(xml_bytes)
     print(f"已生成压缩文件: {os.path.abspath(XML_GZ_FILENAME)}")
@@ -868,7 +1015,7 @@ def _write_epg_files_and_stats(root, stats, output_file=None):
     if XML_SKIP_CHANNELS_WITHOUT_EPG:
         print(f"   - 已跳过 {stats['skipped_no_epg']} 个没有节目数据的频道")
 
-    ensure_parent_directory(EPG_STATISTICS_LOG)
+    os.makedirs(LOG_DIR, exist_ok=True)
     with open(EPG_STATISTICS_LOG, "w", encoding="utf-8") as f:
         f.write(f"EPG 合成详细统计\n{LOG_SEPARATOR}\n\n")
         f.write(f"基本统计:\n")
@@ -894,10 +1041,7 @@ def _write_epg_files_and_stats(root, stats, output_file=None):
     print(f"\n详细统计已保存到: {os.path.abspath(EPG_STATISTICS_LOG)}")
     print(LOG_SEPARATOR)
 
-def download_and_save_all_schedules(channels_for_xml, output_file=None):
-    if output_file is None:
-        output_file = XML_FILENAME
-
+def download_and_save_all_schedules(channels_for_xml, output_file=XML_FILENAME):
     # 1. 并行下载EPG数据
     all_schedules = _download_epg_data_parallel(channels_for_xml)
     
@@ -978,11 +1122,7 @@ def run_epg_download(channels, custom_channels_config, grouped_channels):
     download_and_save_all_schedules(channels_to_write_to_xml)
     # --- EPG 函数内容结束 ---
 
-def download_external_m3u(url, cache_file=None):
-    if cache_file is None:
-        cache_file = EXTERNAL_M3U_CACHE_FILE
-
-    # 尝试从网络下载
+def download_external_m3u(url):
     try:
         print(f"正在下载外部 M3U 文件: {url}")
         # 模拟浏览器的 HTTP 头部信息，避免 403 Forbidden 错误
@@ -1002,35 +1142,11 @@ def download_external_m3u(url, cache_file=None):
         if response:
             content = response.text
             print(f"成功下载外部 M3U 文件，大小: {len(content)} 字节")
-            
-            # --- 新增：成功下载后，将其保存到本地缓存 ---
-            try:
-                ensure_parent_directory(cache_file)
-                with open(cache_file, 'w', encoding='utf-8') as f:
-                    f.write(content)
-                print(f"已将外部 M3U 更新并缓存至本地: {cache_file}")
-            except Exception as e:
-                print(f"警告: 写入本地缓存文件失败: {e}")
-                
             return content
+        return None
     except Exception as e:
         print(f"下载外部 M3U 文件失败: {e}")
-
-    # --- 新增：如果下载失败，尝试读取本地缓存 ---
-    print(f"尝试使用本地缓存的外部 M3U 文件: {cache_file}")
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-            print(f"成功读取本地缓存文件，大小: {len(content)} 字节")
-            return content
-        except Exception as e:
-            print(f"读取本地缓存文件失败: {e}")
-    else:
-        print("本地缓存文件不存在，无法执行回退机制。")
-
-    return None
-
+        return None
 
 def parse_m3u_content(m3u_content, target_groups):
     """
@@ -1164,7 +1280,7 @@ def build_external_extinf_line(channel, use_proxy=True):
     # 如果不需要代理，返回原始行
     return original_line
 
-def generate_m3u_content(grouped_channels, replace_url, catchup_template=None, external_channels=None, is_tv_m3u=False, channel_order=None):
+def generate_m3u_content(grouped_channels, replace_url, catchup_template=CATCHUP_URL_TEMPLATE, external_channels=None, is_tv_m3u=False, channel_order=None):
     """
     生成 M3U 内容
     :param grouped_channels: 本地频道分组字典
@@ -1177,8 +1293,6 @@ def generate_m3u_content(grouped_channels, replace_url, catchup_template=None, e
     """
     if channel_order is None:
         channel_order = {}
-    if catchup_template is None:
-        catchup_template = CATCHUP_URL_TEMPLATE
 
     # 排序辅助函数：对给定的外部频道列表按 order_list 排序
     def sort_external_channels(channels, order_list):
@@ -1406,9 +1520,6 @@ def generate_m3u_content(grouped_channels, replace_url, catchup_template=None, e
 
 
 def main():
-    # 先加载外部配置，确保后续流程使用最终配置值
-    initialize_configuration()
-
     # 打印当前使用的配置
     print_configuration()
     
@@ -1539,7 +1650,7 @@ def main():
     blacklisted_external_channels = []
     if ENABLE_EXTERNAL_M3U_MERGE and EXTERNAL_M3U_URL and target_groups_raw:
         print(f"\n开始处理外部 M3U 合并...")
-        external_m3u_content = download_external_m3u(EXTERNAL_M3U_URL, EXTERNAL_M3U_CACHE_FILE)
+        external_m3u_content = download_external_m3u(EXTERNAL_M3U_URL)
         if external_m3u_content:
             external_channels, blacklisted_external_channels = parse_m3u_content(external_m3u_content, target_groups_raw)
             
@@ -1581,7 +1692,6 @@ def main():
         (APTV_M3U_FILENAME, True, CATCHUP_URL_APTV, False)         # 单播地址，APTV回看模板 (新增)
     ]:
         content = generate_m3u_content(grouped_channels, replace_url, catchup_template, external_channels, is_tv_m3u, channel_order)
-        ensure_parent_directory(filename)
         with open(filename, 'w', encoding='utf-8') as f:
             f.write(content)
         external_count = len(external_channels) if external_channels else 0
@@ -1610,7 +1720,7 @@ def main():
     print(f"APTV回看参数列表: {os.path.abspath(APTV_M3U_FILENAME)}") # 新增输出信息
     
     # 统一生成完整的日志文件，包含主JSON和自定义频道的所有处理结果
-    ensure_parent_directory(CHANNEL_PROCESSING_LOG)
+    os.makedirs(LOG_DIR, exist_ok=True)
     with open(CHANNEL_PROCESSING_LOG, "w", encoding="utf-8") as f:
         f.write("频道处理日志\n")
         f.write(f"{LOG_SEPARATOR}\n\n")

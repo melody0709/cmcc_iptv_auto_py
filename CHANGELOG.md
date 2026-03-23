@@ -4,7 +4,12 @@
 
 ## [Unreleased]
 
-- （待发布变更）
+- 配置加载改进：`tv.py` 启动时按 `config/config.json` -> `config/myconfig.json` 覆盖加载配置。
+- EPG 下载改进：新增并启用 `EPG_DAY_OFFSETS` 多天下载窗口（例如 `[-5,-4,-3,-2,-1,0,1]`）。
+- EPG 合成修复：修正节目去重字段匹配，恢复多天场景下节目条目数量异常偏低的问题。
+- 路径兼容修复：配置文件路径改为基于脚本目录解析，避免 UNC/CWD 变化导致读取失败。
+- 日志路径修复：`channel_processing.log` 与 `epg_statistics.log` 固定输出到 `log/` 目录并自动创建目录。
+- 文档更新：补充 Windows UNC 下稳定运行命令与配置使用说明。
 
 ## [v2026.3.23] - 2026-03-23
 

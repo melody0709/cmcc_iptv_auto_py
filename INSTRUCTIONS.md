@@ -22,9 +22,22 @@
 - 配置加载优先级：`config/config.json` -> `config/myconfig.json`（后者覆盖前者同名键）。
 - `config/myconfig.json` 仅存放个人差异项，避免复制整份默认配置。
 
+### 常规运行（推荐）
+
 ```powershell
 python .\tv.py
 ```
+
+### Windows UNC 路径稳定运行（避免反复试错）
+
+当工作目录是 UNC 路径（例如 `\\DS920\web\IPTV\gemini`）且使用 `conda run` 时，CMD 可能回落到 `C:\Windows`。为避免该问题，固定使用“绝对脚本路径”执行：
+
+```powershell
+C:/ProgramData/miniconda3/Scripts/conda.exe run -p C:\ProgramData\miniconda3 --no-capture-output python "\\DS920\web\IPTV\gemini\tv.py"
+```
+
+- 这条命令可以稳定运行脚本，不依赖当前工作目录。
+- 若以后仓库路径变化，只替换命令末尾 `tv.py` 的绝对路径即可。
 
 ## 4) 修改原则（必须遵守）
 
@@ -50,7 +63,9 @@ python .\tv.py
 
 ## 7) 提交前自检清单
 
-- 能成功运行：`python .\tv.py`。
+- 能成功运行（二选一）：
+  - `python .\tv.py`
+  - `C:/ProgramData/miniconda3/Scripts/conda.exe run -p C:\ProgramData\miniconda3 --no-capture-output python "\\DS920\web\IPTV\gemini\tv.py"`
 - 至少检查以下输出是否生成且非空：
   - `tv.m3u`
   - `tv2.m3u`

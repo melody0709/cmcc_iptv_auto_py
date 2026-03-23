@@ -69,6 +69,14 @@
 
 如果 `config/myconfig.json` 中存在同名配置项，会覆盖 `config/config.json`。
 
+### 配置文件用法提示
+
+- `config/config.json`：放常用配置，建议提交到仓库。
+- `config/myconfig.json`：只放你本机差异项（例如本地 UDPXY、代理地址），优先级更高。
+- 高级参数默认值已内置在 `tv.py`，通常不需要改代码。
+- 这两个文件都必须是**标准 JSON**，不能写 `//` 或 `#` 注释。
+- 需要说明时，请写在 `"__usage__"` 字段或 README 文档里。
+
 ### 基本配置
 
 在 `config/config.json` 或 `config/myconfig.json` 中修改以下配置：
@@ -114,6 +122,10 @@
 
 # EPG下载模式
 "EPG_DOWNLOAD_MODE": "M3U_ONLY",
+
+# EPG下载日期偏移（单位：天）
+# 示例：[-5, -4, -3, -2, -1, 0, 1] = 前5天 + 当天 + 明天
+"EPG_DAY_OFFSETS": [-5, -4, -3, -2, -1, 0, 1],
 
 # EPG合成模式
 "XML_SKIP_CHANNELS_WITHOUT_EPG": true
@@ -575,7 +587,7 @@ netstat -ln | grep 7077
 /etc/init.d/nginx restart
 ```
 
-配置完成后，tv.py文件修改 `NGINX_PROXY_PREFIX = "http://c.top:7077"`，回看地址和Logo地址会自动通过Nginx代理：
+配置完成后，在 `config/myconfig.json` 中设置 `"NGINX_PROXY_PREFIX": "http://c.top:7077"`，回看地址和Logo地址会自动通过Nginx代理：
 
 - ⏪ 回看地址：`http://c.top:7077/183.235.162.80:6610/190000002005/ch000000000000104/index.m3u8?starttime=...`
 - 🖼️ Logo地址：`http://c.top:7077/183.235.16.92:8081/pics/micro-picture/channelNew/xxx.png`
@@ -620,7 +632,7 @@ crontab -e
 ### 📺 EPG下载机制
 
 - 🌐 支持多源并行下载，自动分配任务
-- 📅 自动下载当天和次日的EPG数据
+- 📅 支持按 `EPG_DAY_OFFSETS` 下载多天EPG（例如前5天到次日）
 - 🔄 支持重试机制（默认重试3次）
 - 📊 显示实时下载进度
 
@@ -641,7 +653,7 @@ crontab -e
 ### 使用效果
 
 - **🌐 同城移动大局域网访问正常**：多套房子实现共享，鉴于上传带宽40mbps，正常只支持外网4路8m码率的
-- **📺 EPG数据完整**：大部分频道有明天的epg，网上的基本都是当天的，回看正常，只针对酷9最新版本
+- **📺 EPG数据完整**：可通过 `EPG_DAY_OFFSETS` 获取多天EPG（如前5天到次日），节目条目更完整
 - **🏘️ 本地台支持**：缺失大部分广东本地台的ztecode、code，因为默认json都不带本地台，需要通过 `config/custom_channels.json` 手动添加
 
 ### 播放器效果截图
@@ -663,7 +675,7 @@ crontab -e
 ## ⚠️ 注意事项
 
 1. **🌐 网络访问**：脚本需要能够访问 `183.235.0.0/16` 网段，必须通过IPTV接口
-2. **📋 频道数据**：默认JSON可能不包含所有本地台，需要通过 `config/custom_channels.json` 手动添加
+2. **📋 频道数据**：默认配置可能不包含所有本地台，需要通过 `config/custom_channels.json` 手动添加
 3. **⏰ 回看时间**：回看使用UTC时间
 4. **📺 EPG数据**：大部分频道有次日的EPG数据，比网上常见的EPG源更完整
 5. **⏪ 额外主json**：[http://183.235.16.92:8082/epg/api/getAllChannel.json](http://183.235.16.92:8082/epg/api/getAllChannel.json) 这个地址包含大量地方台，但是近100个失效，暂时不采用，可以作为自定义参考
