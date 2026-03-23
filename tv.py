@@ -261,7 +261,7 @@ def load_json_config_file(file_path):
         return {}
 
 def normalize_epg_day_offsets(offsets):
-    """标准化 EPG_DAY_OFFSETS，非法值回退默认。"""
+    """标准化 EPG_DAY_OFFSETS，支持显式偏移列表和简化天数写法。"""
     if not isinstance(offsets, list):
         print("EPG_DAY_OFFSETS 不是列表，已回退默认值。")
         return DEFAULT_EPG_DAY_OFFSETS.copy()
@@ -276,11 +276,20 @@ def normalize_epg_day_offsets(offsets):
         except (TypeError, ValueError):
             continue
 
-    normalized = sorted(set(normalized))
     if not normalized:
         print("EPG_DAY_OFFSETS 无有效整数，已回退默认值。")
         return DEFAULT_EPG_DAY_OFFSETS.copy()
-    return normalized
+
+    # 简化写法: [N] 表示“包含明天(+1)在内，共 N 天”。例如 [9] => [-7,-6,-5,-4,-3,-2,-1,0,1]
+    if len(normalized) == 1 and normalized[0] > 0:
+        total_days = normalized[0]
+        if total_days < 2:
+            print("EPG_DAY_OFFSETS 简化写法最小值为 2，已回退默认值。")
+            return DEFAULT_EPG_DAY_OFFSETS.copy()
+        start_offset = -(total_days - 2)
+        return list(range(start_offset, 2))
+
+    return sorted(set(normalized))
 
 def load_runtime_config_overrides():
     """按优先级加载配置：config.json -> myconfig.json。"""

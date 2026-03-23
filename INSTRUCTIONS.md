@@ -93,7 +93,7 @@ C:/ProgramData/miniconda3/Scripts/conda.exe run -p C:\ProgramData\miniconda3 --n
 
 - `VERSION` 为版本号单一事实来源（Single Source of Truth），格式：`YYYY.M.D`。
 - 发布版本时必须同步更新三处：`VERSION`、`CHANGELOG.md`、`README.md` 顶部版本信息。
-- `CHANGELOG.md` 保留 `Unreleased` 段，并在发布时新增版本段落（如 `v2026.3.23`）。
+
 
 ## 11) AI 助手执行约束
 

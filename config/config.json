@@ -1,15 +1,15 @@
 {
   "IS_HWURL": true,
+  "EPG_DAY_OFFSETS": [9],
   "REPLACEMENT_IP": "http://c.cc.top:7088/udp",
   "REPLACEMENT_IP_TV": "http://10.10.10.1:5140/udp",
-  "JSON_URL": "http://183.235.16.92:8082/epg/api/custom/getAllChannel.json",
   "M3U_EPG_URL": "http://c.cc.top:6789/t.xml",
+  "JSON_URL": "http://183.235.16.92:8082/epg/api/custom/getAllChannel.json",
   "CATCHUP_SOURCE_PREFIX": "http://183.235.162.80:6610/190000002005",
   "EPG_BASE_URLS": [
     "http://183.235.16.92:8082/epg/api/channel/",
     "http://183.235.11.39:8082/epg/api/channel/"
   ],
-  "EPG_DAY_OFFSETS": [-5, -4, -3, -2, -1, 0, 1],
   "ENABLE_EPG_DOWNLOAD": true,
   "EPG_DOWNLOAD_MODE": "M3U_ONLY",
   "NGINX_PROXY_PREFIX": "",
