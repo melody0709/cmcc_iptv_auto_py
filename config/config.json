@@ -1,6 +1,6 @@
 {
   "IS_HWURL": true,
-  "EPG_DAY_OFFSETS": [9],
+  "EPG_DAY_OFFSETS": [8],
   "REPLACEMENT_IP": "http://c.cc.top:7088/udp",
   "REPLACEMENT_IP_TV": "http://10.10.10.1:5140/udp",
   "M3U_EPG_URL": "http://c.cc.top:6789/t.xml",
@@ -18,5 +18,6 @@
   "EXTERNAL_GROUP_TITLES": {
     "🔮[三网]港澳台直播": "港澳台"
   },
-  "ENABLE_EXTERNAL_M3U_MERGE": true
+  "ENABLE_EXTERNAL_M3U_MERGE": true,
+  "CACHE_M3U_FILENAME": "cache.m3u"
 }

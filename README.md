@@ -3,7 +3,14 @@
 全流程自动化的广东移动IPTV频道列表和EPG节目单抓取工具，支持频道分组、黑名单过滤、自定义频道合并、分组排序、回看功能等。
 
 **版本日期**: 2026.03.24
-**项目版本**: v1.1
+**项目版本**: v1.2
+
+### 更新:外部 M3U 缓存与去重 (v1.2)
+
+- 外部 M3U 默认优先网络更新，失败时自动回退本地 `cache.m3u` 缓存。
+- 新增 `CACHE_M3U_FILENAME` 配置项，可自定义外部 M3U 缓存文件名。
+- 外部 M3U 内部遇到“同 URL 不同别名”时，仅保留第一次出现的频道。
+- `log/channel_processing.log` 会记录外部 M3U 的数据来源和 URL 重复过滤结果。
 
 ### 更新:EPG 天数设置简化 (v1.1)
 
@@ -144,7 +151,8 @@
 # 外部 M3U 合并配置
 "EXTERNAL_M3U_URL": "https://bc.188766.xyz/?ip=&mishitong=true&mima=mianfeibuhuaqian&json=true",
 "EXTERNAL_GROUP_TITLES": ["粤语频道"],
-"ENABLE_EXTERNAL_M3U_MERGE": true
+"ENABLE_EXTERNAL_M3U_MERGE": true,
+"CACHE_M3U_FILENAME": "cache.m3u"
 ```
 
 **配置说明**：
@@ -152,12 +160,15 @@
 - **EXTERNAL_M3U_URL**：外部 M3U 文件的下载地址，支持 HTTP/HTTPS 协议
 - **EXTERNAL_GROUP_TITLES**：要提取的频道分组列表，脚本会从外部 M3U 中提取这些 `group-title` 的频道
 - **ENABLE_EXTERNAL_M3U_MERGE**：是否启用外部 M3U 合并功能，设置为 `False` 可禁用此功能
+- **CACHE_M3U_FILENAME**：外部 M3U 的本地缓存文件名，默认是 `cache.m3u`
 
 **功能特性**：
 
 - ✅ 自动下载外部 M3U 文件（使用浏览器 User-Agent 避免 403 错误）
+- ✅ 默认优先网络更新，网络失败时自动回退到本地 `cache.m3u` 缓存
 - ✅ 按 `group-title` 过滤提取指定分组的频道
 - ✅ 自动应用黑名单过滤规则
+- ✅ 外部 M3U 内部遇到“同 URL 不同别名”时，仅保留第一次出现的频道
 - ✅ 支持 Nginx 代理（如果设置了 `NGINX_PROXY_PREFIX`，外部频道的 URL 和 Logo 会自动通过代理）
 - ✅ 智能排序：如果外部分组在 `GROUP_OUTPUT_ORDER` 中，会按顺序输出；否则会添加到 M3U 文件末尾,同时应用分组内部排序
 - ✅ 合并到所有生成的 M3U 文件（tv.m3u、tv2.m3u、ku9.m3u、 ）
@@ -167,6 +178,8 @@
 - 如果外部分组名称在 `GROUP_OUTPUT_ORDER` 中已存在，外部频道会合并到对应分组位置
 - 如果外部分组名称不在 `GROUP_OUTPUT_ORDER` 中，外部频道会添加到 M3U 文件末尾
 - 外部频道同样会应用黑名单过滤规则
+- 网络更新成功后会刷新本地 `cache.m3u`；如果网络更新失败，会优先尝试读取该缓存继续合并
+- 外部 M3U 内部如果出现同一个 URL 对应多个别名，脚本只保留第一次出现的频道，后续重复条目仅记日志不合并
 - 外部频道的 Logo 和 URL 会自动应用 Nginx 代理（如果已配置）
 
 ### 🚫 黑名单配置

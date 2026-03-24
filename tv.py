@@ -78,18 +78,19 @@ EXTERNAL_GROUP_TITLES = {
     "🔮[主用]港澳台直播": "港澳台"
 }
 ENABLE_EXTERNAL_M3U_MERGE = True  # 是否合并外部 M3U 到所有 M3U 文件 (True/False)
+CACHE_M3U_FILENAME = "cache.m3u"  # 外部 M3U 下载缓存文件名
 
 #  扩展黑名单配置 - 支持按 title、code 或 zteurl 过滤
 BLACKLIST_RULES = {
-    "title": ["测试频道", "购物", "导视", "百视通", "指南", "精选频道","移动咪咕五大联赛4K","咪咕五大联赛4K","TVB翡翠(馬來)","HOY76","HOY77","好莱坞电影","華藝中文","ROCK_Action","TNTS","镜新闻", "GOOD","RHK", "唐NTD","八度空间","Now直播","POPC","AXN","iQIYI","星空","博斯"],
-    "code": [
-             # "02000006000000052022060699000003",
+    "title": [
+        "测试频道", "CGTN 西班牙语", "CGTN 法语", "CGTN 阿拉伯语", "CGTN 俄语",
+        "购物", "导视", "百视通", "指南", "精选频道", "移动咪咕五大联赛4K", "咪咕五大联赛4K",
+        "TVB翡翠(馬來)", "HOY76", "HOY77", "好莱坞电影", "華藝中文", "ROCK_Action", "TNTS",
+        "镜新闻", "GOOD", "RHK", "唐NTD", "八度空间", "Now直播", "POPC", "AXN", "iQIYI", "星空", "博斯"
     ],
-    "zteurl": [
-              # "rtp://239.21.0.137:3892",
-    ]
+    "code": ["02000000000000050000000000000148"],
+    "zteurl": []
 }
-
 # 🚀 性能优化：转换为集合（运行时根据配置刷新）
 BLACKLIST_TITLE_SET = set()
 BLACKLIST_CODE_SET = set()
@@ -131,44 +132,22 @@ XML_SKIP_CHANNELS_WITHOUT_EPG = True # 默认为 True
 # 1. 定义所有分组和它们的关键字 (这里的顺序不重要)
 GROUP_DEFINITIONS = {
     "央视": ["CCTV"],
-    "央视特色": ["兵器科技", "风云", "第一剧场", "世界地理", "央视", "卫生健康", "怀旧", "女性", "高尔夫", "金鹰纪实"],
+    "央视特色": ["兵器科技", "风云", "第一剧场", "世界地理", "央视", "卫生健康", "怀旧", "女性", "高尔夫", "金鹰纪实", "CGTN"],
     "广东": ["广东", "大湾区", "经济科教", "南方", "岭南", "现代教育", "移动频道"],
     "卫视": ["卫视"],
     "少儿": ["少儿", "卡通", "动画", "教育"],
-    "CGTN": ["CGTN"],
     "华数咪咕": ["爱", "睛彩", "IPTV", "咪咕", "热播", "经典", "魅力"],
     "超清4k": ["超清", "4k", "4K"],
-    "广东地方台": [],  # 自定义频道分组，没有关键字
-    "其他": []          # 保底分组，没有关键字
+    "广东地方台": [],
+    "其他": []
 }
 
 # 2. 定义分类逻辑的 *优先级* (e.g., "少儿" 必须在 "央视" 之前) 这里的顺序决定一个频道被分到哪个组
-GROUP_CLASSIFICATION_PRIORITY = [
-    "少儿",       # 必须在 "央视" 和 "广东" 之前,不然cctv14少儿 会分到央视,确保每个分组只有一个频道,不会有重复频道
-    "超清4k",   # 必须在 "央视" 之前，否则CCTV-4K会被分到央视
-    "央视",
-    "央视特色",
-    "广东",
-    "CGTN",
-    "卫视",
-    "华数咪咕",
-    # "广东地方台" 和 "其他" 没有关键字，不需要在这里
-]
+GROUP_CLASSIFICATION_PRIORITY = ["少儿", "超清4k", "央视", "央视特色", "广东", "卫视", "华数咪咕"]
 
 # 3. 定义 M3U 和 XML 文件中的 *输出顺序* (你可以随意排列这里的顺序，"少儿" 重排序)
-GROUP_OUTPUT_ORDER = [
-    "央视",
-    "港澳台",
-    "广东",
-    "央视特色",
-    "少儿",  # <--- "少儿" 重排序
-    "卫视",
-    "华数咪咕",
-    "CGTN",
-    "超清4k",
-    "其他",
-    "广东地方台"
-]
+GROUP_OUTPUT_ORDER = ["央视", "港澳台", "广东", "央视特色", "少儿", "卫视", "华数咪咕", "超清4k", "其他", "广东地方台"]
+
 
 # 自动生成的压缩文件名（基于XML文件名）
 XML_GZ_FILENAME = XML_FILENAME + ".gz"
@@ -328,6 +307,7 @@ def refresh_derived_config_values():
     global EPG_BASE_URLS
     global BLACKLIST_TITLE_SET, BLACKLIST_CODE_SET, BLACKLIST_ZTEURL_SET
     global REPLACEMENT_IP_NORM, REPLACEMENT_IP_TV_NORM, CATCHUP_SOURCE_PREFIX_NORM, NGINX_PROXY_PREFIX_NORM
+    global EXTERNAL_M3U_CACHE_FILE
 
     EPG_DAY_OFFSETS = normalize_epg_day_offsets(EPG_DAY_OFFSETS)
 
@@ -365,6 +345,8 @@ def refresh_derived_config_values():
     REPLACEMENT_IP_TV_NORM = normalize_url(str(REPLACEMENT_IP_TV), trailing_slash='add') if REPLACEMENT_IP_TV else ""
     CATCHUP_SOURCE_PREFIX_NORM = normalize_url(str(CATCHUP_SOURCE_PREFIX), trailing_slash='remove') if CATCHUP_SOURCE_PREFIX else ""
     NGINX_PROXY_PREFIX_NORM = normalize_url(str(NGINX_PROXY_PREFIX), trailing_slash='add') if NGINX_PROXY_PREFIX else ""
+    cache_filename = str(CACHE_M3U_FILENAME).strip() if CACHE_M3U_FILENAME else "cache.m3u"
+    EXTERNAL_M3U_CACHE_FILE = os.path.join(BASE_DIR, cache_filename or "cache.m3u")
 
 # 启动时加载并应用配置
 RUNTIME_CONFIG = load_runtime_config_overrides()
@@ -417,6 +399,7 @@ def print_configuration():
     print(f"外部M3U合并开关: {'启用' if ENABLE_EXTERNAL_M3U_MERGE else '禁用'}")
     if ENABLE_EXTERNAL_M3U_MERGE:
         print(f"外部M3U地址: {EXTERNAL_M3U_URL}")
+        print(f"外部M3U缓存文件: {EXTERNAL_M3U_CACHE_FILE}")
         print(f"提取的分组: {', '.join(EXTERNAL_GROUP_TITLES) if EXTERNAL_GROUP_TITLES else '(未配置)'}")
 
 def download_with_retry(url, max_retries=EPG_DOWNLOAD_RETRY_COUNT, timeout=EPG_DOWNLOAD_TIMEOUT, headers=None):
@@ -1131,7 +1114,67 @@ def run_epg_download(channels, custom_channels_config, grouped_channels):
     download_and_save_all_schedules(channels_to_write_to_xml)
     # --- EPG 函数内容结束 ---
 
+def is_valid_m3u_content(content):
+    """校验外部 M3U 内容是否基本有效。"""
+    if not content or not isinstance(content, str):
+        return False
+
+    stripped = content.strip()
+    if not stripped:
+        return False
+
+    return stripped.startswith('#EXTM3U') or '#EXTINF' in stripped
+
+def load_external_m3u_cache(cache_file_path):
+    """读取外部 M3U 缓存文件。"""
+    if not os.path.exists(cache_file_path):
+        print(f"外部 M3U 缓存不存在: {cache_file_path}")
+        return None
+
+    try:
+        with open(cache_file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        if not is_valid_m3u_content(content):
+            print(f"外部 M3U 缓存内容无效，已忽略: {cache_file_path}")
+            return None
+        print(f"已读取外部 M3U 缓存: {cache_file_path}")
+        return content
+    except Exception as e:
+        print(f"读取外部 M3U 缓存失败: {e}")
+        return None
+
+def save_external_m3u_cache(content, cache_file_path):
+    """写入外部 M3U 缓存文件。"""
+    if not is_valid_m3u_content(content):
+        print("外部 M3U 下载内容无效，跳过刷新缓存")
+        return False
+
+    try:
+        with open(cache_file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"已刷新外部 M3U 缓存: {cache_file_path}")
+        return True
+    except Exception as e:
+        print(f"写入外部 M3U 缓存失败: {e}")
+        return False
+
+def normalize_external_channel_url(url):
+    """规范化外部频道 URL，用于去重比较。"""
+    if not url:
+        return ""
+
+    normalized = str(url).strip()
+    parsed = urlparse(normalized)
+    if parsed.scheme or parsed.netloc:
+        parsed = parsed._replace(
+            scheme=parsed.scheme.lower(),
+            netloc=parsed.netloc.lower()
+        )
+        normalized = parsed.geturl()
+    return normalized
+
 def download_external_m3u(url):
+    cache_source = "none"
     try:
         print(f"正在下载外部 M3U 文件: {url}")
         # 模拟浏览器的 HTTP 头部信息，避免 403 Forbidden 错误
@@ -1150,25 +1193,37 @@ def download_external_m3u(url):
         response = download_with_retry(url, max_retries=3, timeout=30, headers=headers)
         if response:
             content = response.text
-            print(f"成功下载外部 M3U 文件，大小: {len(content)} 字节")
-            return content
-        return None
+            if is_valid_m3u_content(content):
+                print(f"成功下载外部 M3U 文件，大小: {len(content)} 字节")
+                save_external_m3u_cache(content, EXTERNAL_M3U_CACHE_FILE)
+                return content, "network"
+            print("外部 M3U 下载成功，但内容无效，尝试使用本地缓存")
     except Exception as e:
         print(f"下载外部 M3U 文件失败: {e}")
-        return None
+
+    cached_content = load_external_m3u_cache(EXTERNAL_M3U_CACHE_FILE)
+    if cached_content:
+        print("外部 M3U 网络更新失败，已回退到本地缓存")
+        cache_source = "cache"
+        return cached_content, cache_source
+
+    print("外部 M3U 网络更新失败，且本地缓存不可用")
+    return None, cache_source
 
 def parse_m3u_content(m3u_content, target_groups):
     """
     解析 M3U 内容，提取指定 group-title 的频道，并应用黑名单过滤
     """
     if not m3u_content or not target_groups:
-        return [], []
+        return [], [], []
     
     # 将目标分组转换为集合，提高查找效率
     target_groups_set = set(target_groups)
     
     channels = []
     blacklisted_channels = []
+    duplicate_url_channels = []
+    seen_urls = set()
     lines = m3u_content.strip().split('\n')
     i = 0
     
@@ -1234,6 +1289,25 @@ def parse_m3u_content(m3u_content, target_groups):
                     current_channel = None
                     i += 1
                     continue
+
+                normalized_url = normalize_external_channel_url(current_channel['url'])
+                if not normalized_url:
+                    current_channel = None
+                    i += 1
+                    continue
+
+                if normalized_url in seen_urls:
+                    duplicate_url_channels.append({
+                        'title': current_channel['title'],
+                        'group_title': current_channel['group_title'],
+                        'url': current_channel['url'],
+                        'reason': '外部M3U存在同URL不同别名，已保留首次出现的频道'
+                    })
+                    current_channel = None
+                    i += 1
+                    continue
+
+                seen_urls.add(normalized_url)
                 
                 # 创建一个新的字典副本，避免引用问题
                 channel_copy = current_channel.copy()
@@ -1247,7 +1321,9 @@ def parse_m3u_content(m3u_content, target_groups):
     print(f"从外部 M3U 中提取了 {len(channels)} 个频道 (目标分组: {', '.join(target_groups)})")
     if blacklisted_channels:
         print(f"已过滤 {len(blacklisted_channels)} 个黑名单外部频道")
-    return channels, blacklisted_channels
+    if duplicate_url_channels:
+        print(f"已按 URL 去重 {len(duplicate_url_channels)} 个外部频道（保留首次出现）")
+    return channels, blacklisted_channels, duplicate_url_channels
 
 def build_external_extinf_line(channel, use_proxy=True):
     """
@@ -1657,11 +1733,13 @@ def main():
     # 下载并解析外部 M3U（如果启用合并）
     external_channels = None
     blacklisted_external_channels = []
+    duplicate_external_channels = []
+    external_m3u_source = "none"
     if ENABLE_EXTERNAL_M3U_MERGE and EXTERNAL_M3U_URL and target_groups_raw:
         print(f"\n开始处理外部 M3U 合并...")
-        external_m3u_content = download_external_m3u(EXTERNAL_M3U_URL)
+        external_m3u_content, external_m3u_source = download_external_m3u(EXTERNAL_M3U_URL)
         if external_m3u_content:
-            external_channels, blacklisted_external_channels = parse_m3u_content(external_m3u_content, target_groups_raw)
+            external_channels, blacklisted_external_channels, duplicate_external_channels = parse_m3u_content(external_m3u_content, target_groups_raw)
             
             # 应用分组名映射
             if external_channels and group_name_mapping:
@@ -1678,7 +1756,8 @@ def main():
                     print(f"  映射外部频道分组: {mapping_desc}")
             
             if external_channels:
-                print(f"成功提取 {len(external_channels)} 个外部频道，将合并到所有 M3U 文件")
+                source_desc = "网络" if external_m3u_source == "network" else "缓存"
+                print(f"成功提取 {len(external_channels)} 个外部频道，将合并到所有 M3U 文件（来源: {source_desc}）")
                 # 检查外部分组是否在 GROUP_OUTPUT_ORDER 中
                 for external_group in set(ch['group_title'] for ch in external_channels):
                     if external_group in GROUP_OUTPUT_ORDER:
@@ -1719,6 +1798,11 @@ def main():
     if blacklisted_external_channels:
         blacklist_info_parts.append(f"外部: {len(blacklisted_external_channels)}")
     print(f"总共过滤 {len(all_blacklisted_channels)} 个黑名单频道（{', '.join(blacklist_info_parts)}）")
+    if external_m3u_source != "none":
+        source_desc = "网络" if external_m3u_source == "network" else "缓存"
+        print(f"外部 M3U 来源: {source_desc}")
+    if duplicate_external_channels:
+        print(f"外部 M3U 按 URL 去重 {len(duplicate_external_channels)} 个频道（保留首次出现）")
     
     if external_count > 0:
         print(f"成功生成 {total_channels} 个本地频道 + {external_count} 个外部频道 = 总计 {total_channels_with_external} 个频道")
@@ -1805,6 +1889,13 @@ def main():
         if ENABLE_EXTERNAL_M3U_MERGE:
             f.write("【外部 M3U 频道处理结果】\n")
             f.write(f"{LOG_SEPARATOR}\n\n")
+            source_desc = {
+                "network": "网络更新",
+                "cache": "本地缓存",
+                "none": "未使用"
+            }.get(external_m3u_source, external_m3u_source)
+            f.write(f"数据来源: {source_desc}\n")
+            f.write(f"缓存文件: {EXTERNAL_M3U_CACHE_FILE}\n\n")
             
             f.write(f"1. 黑名单过滤 ({len(blacklisted_external_channels)} 个):\n")
             if blacklisted_external_channels:
@@ -1814,7 +1905,15 @@ def main():
                 f.write("  (无)\n")
             f.write("\n")
             
-            f.write(f"2. 成功合并 ({external_count} 个):\n")
+            f.write(f"2. URL 重复过滤 ({len(duplicate_external_channels)} 个):\n")
+            if duplicate_external_channels:
+                for channel in duplicate_external_channels:
+                    f.write(f"  - [{channel.get('group_title', '未知分组')}] {channel['title']} -> {channel['url']} ({channel['reason']})\n")
+            else:
+                f.write("  (无)\n")
+            f.write("\n")
+
+            f.write(f"3. 成功合并 ({external_count} 个):\n")
             if external_channels:
                 for channel in external_channels:
                     f.write(f"  - [{channel.get('group_title', '未知分组')}] {channel['title']}\n")
@@ -1836,6 +1935,11 @@ def main():
             f.write(f"  - 外部频道: {len(blacklisted_external_channels)} 个\n")
         f.write(f"  - 总计: {len(all_blacklisted_channels)} 个\n")
         f.write("\n")
+        if ENABLE_EXTERNAL_M3U_MERGE:
+            f.write(f"外部 M3U 汇总:\n")
+            f.write(f"  - 数据来源: {external_m3u_source}\n")
+            f.write(f"  - URL 去重: {len(duplicate_external_channels)} 个\n")
+            f.write("\n")
         f.write(f"最终频道统计:\n")
         f.write(f"  - 主JSON保留: {len(kept_channels)} 个\n")
         f.write(f"  - 自定义频道: {len(added_custom_channels)} 个\n")
