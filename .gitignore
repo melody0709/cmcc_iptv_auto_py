@@ -12,4 +12,8 @@ t.xml.gz
 external_m3u_cache.m3u
 *.log
 *.bak
+*.db
 config/myconfig.json
+desktop.ini
+.SynologyWorkingDirectory/
+cache.m3u
