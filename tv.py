@@ -14,6 +14,19 @@ from datetime import datetime, timedelta
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import asyncio
+# 将子目录加入 Python 搜索路径,尝试导入同目录下的 checker 模块
+checker_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'iptv_checker_v3')
+if checker_dir not in sys.path:
+    sys.path.append(checker_dir)
+
+try:
+    from iptv_checker_v3 import IPTVCheckerFinal
+    HAS_CHECKER = True
+except ImportError:
+    print("警告: 未在 iptv_checker_v3 目录下找到 iptv_checker_v3.py，智能检测功能将被禁用。")
+    HAS_CHECKER = False
+
 # 设置标准输出编码
 if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -31,9 +44,9 @@ EPG_DOWNLOAD_RETRY_COUNT = 3  # 重试次数
 EPG_DOWNLOAD_RETRY_DELAY = 2  # 重试间隔（秒）
 EPG_DOWNLOAD_TIMEOUT = 15     # 单个请求超时时间（秒）
 # 防风控延迟配置 (保护服务器和本地IP，强烈建议保留默认值)
-EPG_REQUEST_DELAY = 0.2       # 每次请求后的基础等待时间（秒），设为 0 则不等待
+EPG_REQUEST_DELAY = 0.3       # 每次请求后的基础等待时间（秒），设为 0 则不等待
 EPG_RANDOM_DELAY = True       # 是否引入随机波动（模拟人类操作，例如 0.2 秒会随机变为 0.1~0.3 秒，避免被识别为爬虫）
-MAX_CONCURRENT_DOWNLOADS = 6  # EPG 最大并发下载线程数（配合 delay 可将 QPS 压在安全线内，避免触发 403 拦截）
+MAX_CONCURRENT_DOWNLOADS = 4  # EPG 最大并发下载线程数（配合 delay 可将 QPS 压在安全线内，避免触发 403 拦截）
 
 # 输出文件名配置
 TV_M3U_FILENAME = "tv.m3u"        # 组播地址列表文件
@@ -83,6 +96,14 @@ EXTERNAL_GROUP_TITLES = {
 ENABLE_EXTERNAL_M3U_MERGE = True  # 是否合并外部 M3U 到所有 M3U 文件 (True/False)
 CACHE_M3U_FILENAME = "cache.m3u"  # 外部 M3U 下载缓存文件名
 
+# ===================== 智能测活与质量探测配置 =====================
+ENABLE_STREAM_CHECK = True         # 是否启用 iptv_checker_v3 对频道进行存活与质量检测
+CHECK_TARGET_GROUPS = ["港澳台"]    # 需要被检测的分组名称列表 (空列表 [] 则检测所有组)
+CHECK_TIMEOUT = 5                  # 单个频道探测超时时间(秒)
+CHECK_WORKERS = 4                  # 并发检测线程数 (群晖建议 4-8)
+ENABLE_PROBE = True                # 是否启用 ffprobe 进行 1080P/4K 画质深度探测
+CHECK_CACHE_EXPIRE = 24            # ffprobe 画质探测缓存过期时间(小时)
+
 # 扩展黑名单配置
 BLACKLIST_RULES = {
     "title": [
@@ -92,7 +113,12 @@ BLACKLIST_RULES = {
         "镜新闻", "GOOD", "RHK", "唐NTD", "八度空间", "Now直播", "POPC", "AXN", "iQIYI", "星空", "博斯"
     ],
     "code": ["02000000000000050000000000000148"],
-    "zteurl": []
+    # 支持模糊匹配/域名拦截，只要链接包含以下字符串即被拦截
+    "zteurl": [
+        "https://cdn6.163189.xyz/163189/fct4k",
+        "https://cdn.163189.xyz/163189/viu"
+        # "cdn6.163189.xyz"  # <--- 在这里添加你需要拦截的域名、IP或关键词
+    ]
 }
 
 # 🚀 性能优化：预编译集合与正则（运行时根据配置刷新）
@@ -100,6 +126,7 @@ BLACKLIST_TITLE_SET = set()
 BLACKLIST_CODE_SET = set()
 BLACKLIST_ZTEURL_SET = set()
 BLACKLIST_TITLE_PATTERN = None  # 编译后的正则对象，极大提升黑名单检索速度
+BLACKLIST_URL_PATTERN = None    # 编译后的URL正则对象，支持URL关键词/域名拦截
 
 # 频道名称映射（将高清频道映射到标准名称）
 CHANNEL_NAME_MAP = {
@@ -216,7 +243,7 @@ def initialize_environment():
             if key in globals(): globals()[key] = value
 
     global EPG_DAY_OFFSETS, EPG_BASE_URLS
-    global BLACKLIST_TITLE_SET, BLACKLIST_CODE_SET, BLACKLIST_ZTEURL_SET, BLACKLIST_TITLE_PATTERN
+    global BLACKLIST_TITLE_SET, BLACKLIST_CODE_SET, BLACKLIST_ZTEURL_SET, BLACKLIST_TITLE_PATTERN, BLACKLIST_URL_PATTERN
     global REPLACEMENT_IP_NORM, REPLACEMENT_IP_TV_NORM, CATCHUP_SOURCE_PREFIX_NORM, NGINX_PROXY_PREFIX_NORM
     global EXTERNAL_M3U_CACHE_FILE
 
@@ -235,6 +262,12 @@ def initialize_environment():
         BLACKLIST_TITLE_PATTERN = re.compile(pattern_str)
     else:
         BLACKLIST_TITLE_PATTERN = None
+
+    if BLACKLIST_ZTEURL_SET:
+        url_pattern_str = '|'.join(map(re.escape, sorted(BLACKLIST_ZTEURL_SET, key=len, reverse=True)))
+        BLACKLIST_URL_PATTERN = re.compile(url_pattern_str)
+    else:
+        BLACKLIST_URL_PATTERN = None
 
     REPLACEMENT_IP_NORM = normalize_url(str(REPLACEMENT_IP), 'add') if REPLACEMENT_IP else ""
     REPLACEMENT_IP_TV_NORM = normalize_url(str(REPLACEMENT_IP_TV), 'add') if REPLACEMENT_IP_TV else ""
@@ -384,7 +417,9 @@ def is_blacklisted(channel):
     # 安全提取 params (防止源数据中 params 意外为 None)
     params = channel.get("params") or {}
     zteurl = channel.get("zteurl", "") or params.get("zteurl", "") or params.get("hwurl", "")
-    if zteurl in BLACKLIST_ZTEURL_SET: 
+    
+    # 支持模糊匹配和域名的 URL 黑名单检测
+    if BLACKLIST_URL_PATTERN and zteurl and BLACKLIST_URL_PATTERN.search(zteurl): 
         return True
         
     return False
@@ -458,9 +493,21 @@ def add_custom_channels(grouped_channels, custom_channels):
     for group_name, channels in custom_channels.items():
         grouped_channels.setdefault(group_name, [])
         for custom_channel in channels:
+            # 初始化 zteurl 便于被黑名单检测时能够提取到
+            params = custom_channel.get("params") or {}
+            raw_zte = params.get("zteurl", "") or custom_channel.get("zteurl", "")
+            raw_hw = params.get("hwurl", "") or custom_channel.get("hwurl", "")
+            
+            if IS_HWURL:
+                temp_url = raw_hw or raw_zte
+            else:
+                temp_url = raw_zte or raw_hw
+            if not temp_url: temp_url = custom_channel.get("url", "")
+            custom_channel["zteurl"] = temp_url
+            
             if is_blacklisted(custom_channel):
                 blacklisted_custom_channels.append({"title": custom_channel.get('title', '未知'), "code": custom_channel.get('code', ''), "reason": "黑名单匹配", "source": "自定义频道"})
-                print(f"跳过黑名单中的自定义频道: {custom_channel.get('title', '未知')}")
+                print(f"跳过黑名单中的自定义频道: {custom_channel.get('title', '未知')} ({temp_url})")
                 continue
             
             orig_title = custom_channel["title"]
@@ -468,28 +515,15 @@ def add_custom_channels(grouped_channels, custom_channels):
             if orig_title != final_name:
                 print(f"自定义频道名称映射: '{orig_title}' -> '{final_name}'")
                 
-            params = custom_channel.get("params") or {}
             final_ztecode = params.get("ztecode", "") or custom_channel.get("ztecode", "")
             supports_catchup = custom_channel.get("supports_catchup", False) or params.get("supports_catchup", False)
             
             custom_channel.update({"title": final_name, "original_title": orig_title, "number": extract_number(final_name), "ztecode": final_ztecode, "supports_catchup": supports_catchup, "is_custom": True})
             
-            raw_zte = params.get("zteurl", "") or custom_channel.get("zteurl", "")
-            raw_hw = params.get("hwurl", "") or custom_channel.get("hwurl", "")
+            src_type = "HWURL" if (raw_hw and IS_HWURL) or (not raw_zte and raw_hw) else "ZTEURL" if raw_zte else "FALLBACK"
+            custom_channel["url_source"] = src_type if temp_url else "UNKNOWN"
             
-            if IS_HWURL:
-                final_url = raw_hw or raw_zte
-                src_type = "HWURL" if raw_hw else "ZTEURL" if raw_zte else "FALLBACK"
-            else:
-                final_url = raw_zte or raw_hw
-                src_type = "ZTEURL" if raw_zte else "HWURL" if raw_hw else "FALLBACK"
-                
-            if not final_url: final_url = custom_channel.get("url", "")
-            
-            custom_channel["zteurl"] = final_url
-            custom_channel["url_source"] = src_type if final_url else "UNKNOWN"
-            
-            if final_url:
+            if temp_url:
                 print(f"  [{custom_channel['url_source']}] {final_name} (自定义)")
             else:
                 print(f"  [警告] 自定义频道 {final_name} 未找到有效链接")
@@ -843,6 +877,88 @@ def generate_m3u_content(grouped_channels, replace_url, catchup_template=CATCHUP
         
     return '\n'.join(content)
 
+# ===================== 桥接函数：智能检测 =====================
+def run_smart_checker(grouped_channels, external_channels):
+    """将 tv.py 的复杂数据结构降维，送入 Checker 内存检测，再将结果升维合并"""
+    print("\n" + LOG_SEPARATOR)
+    print("启动底层视频流智能检测引擎 (iptv_checker_v3)")
+    print(LOG_SEPARATOR)
+    
+    if not HAS_CHECKER:
+        print("未找到检测组件，跳过测试。")
+        return grouped_channels, external_channels
+
+    checker = IPTVCheckerFinal(
+        target_group=None,  
+        timeout=CHECK_TIMEOUT, 
+        workers=CHECK_WORKERS, 
+        enable_probe=ENABLE_PROBE, 
+        cache_expire_hours=CHECK_CACHE_EXPIRE
+    )
+    
+    channels_to_check = []
+    
+    for group, ch_list in grouped_channels.items():
+        for ch in ch_list:
+            url = ch.get("zteurl")
+            if not url: continue
+            needs_check = not CHECK_TARGET_GROUPS or group in CHECK_TARGET_GROUPS
+            channels_to_check.append({
+                "name": ch.get("final_name", ch["title"]),
+                "url": url,
+                "group": group,
+                "needs_check": needs_check,
+                "is_alive": not needs_check,
+                "msg": "",
+                "_tv_ref": ch,  
+                "_is_external": False
+            })
+
+    if external_channels:
+        for ch in external_channels:
+            url = ch.get("url")
+            if not url: continue
+            group = ch.get("group_title", "")
+            needs_check = not CHECK_TARGET_GROUPS or group in CHECK_TARGET_GROUPS
+            channels_to_check.append({
+                "name": ch.get("title", "Unknown"),
+                "url": url,
+                "group": group,
+                "needs_check": needs_check,
+                "is_alive": not needs_check,
+                "msg": "",
+                "_tv_ref": ch,
+                "_is_external": True
+            })
+            
+    if not channels_to_check:
+        print("没有提取到需要检测的频道URL。")
+        return grouped_channels, external_channels
+
+    if sys.platform == 'win32': asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    processed_channels = asyncio.run(checker.process_channel_list(channels_to_check))
+    
+    dead_count = 0
+    for res in processed_channels:
+        orig_ch = res["_tv_ref"]
+        if not res.get("is_alive", False):
+            orig_ch["_is_dead"] = True
+            dead_count += 1
+        elif res.get("probe_info"):
+            tag = res["probe_info"]
+            if res["_is_external"]:
+                orig_ch["title"] = f"{orig_ch.get('title', '')} {tag}"
+            else:
+                orig_ch["final_name"] = f"{orig_ch.get('final_name', orig_ch['title'])} {tag}"
+                
+    for group in grouped_channels:
+        grouped_channels[group] = [ch for ch in grouped_channels[group] if not ch.get("_is_dead")]
+    
+    if external_channels:
+        external_channels[:] = [ch for ch in external_channels if not ch.get("_is_dead")]
+        
+    print(f"\n智能检测完毕！共剔除了 {dead_count} 个彻底失效的黑屏源。\n")
+    return grouped_channels, external_channels
 
 def main():
     initialize_environment()
@@ -937,6 +1053,10 @@ def main():
                 print(f"警告: 无法下载外部 M3U 文件，跳过外部频道合并")
         else:
             print("警告: EXTERNAL_GROUP_TITLES 配置为空，无法提取外部频道")
+
+# === 在合并完所有的外部频道后，写入文件前，插入拦截检测逻辑 ===
+    if ENABLE_STREAM_CHECK and HAS_CHECKER:
+        run_smart_checker(grouped_channels, external_channels)
 
     # M3U 文件生成
     for filename, replace_url, catchup_template, is_tv_m3u in [

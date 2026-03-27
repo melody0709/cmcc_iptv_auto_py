@@ -17,3 +17,9 @@ config/myconfig.json
 desktop.ini
 .SynologyWorkingDirectory/
 cache.m3u
+venv310/
+__pycache__/
+log/failed_channels.txt
+iptv_checker_v3/log/failed_channels.txt
+iptv_checker_v3/probe_cache.json
+config/probe_cache.json

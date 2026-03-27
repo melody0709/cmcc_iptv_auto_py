@@ -2,10 +2,19 @@
 
 全流程自动化的广东移动IPTV频道列表和EPG节目单抓取工具，支持频道分组、黑名单过滤、自定义频道合并、分组排序、回看功能等。
 
-**版本日期**: 2026.03.25
-**项目版本**: v1.3
+**版本日期**: 2026.03.27
+**项目版本**: v1.4
+
+### 更新: 引入终极智能测活与画质探测引擎 (v1.4)
+
+- **零损耗内存测活**：内置 `iptv_checker` 引擎。在生成 M3U 前，自动并发检测频道的底层真实连通性，彻底剔除黑屏死链。
+- **FFprobe 深度画质探测**：直击底层 `.ts` 视频切片，自动解析频道真实分辨率与编码，并在频道名打上华丽标签（如 `[1080P][HEVC]`, `[4K][H264]`）。
+- **三层防盗链保底机制**：针对高防盗链节点（如 Astro、TVB），自动执行“直击切片 -> 回退 M3U8 -> 文本正则捡漏”，榨干每一滴探测成功率。
+- **无感智能缓存**：自带 `probe_cache.json` 记忆功能（默认24小时）。每天多次运行只测生死不测画质，极度节省 NAS 性能和带宽。
+- 
 
 ### 更新: 核心性能重构与防风控优化 (v1.3)
+
 - 网络连接提速：全面引入 Session 长连接复用，告别频繁 TCP 握手，下载速率成倍提升。
 - 防风控与稳定并发：新增 EPG_REQUEST_DELAY 和最高并发限制，模拟真实人类操作，有效避免- 高频请求被服务器拦截拉黑。
 - 极低内存消耗：采用原生 xml.etree 原地缩进替换沉重的 minidom，生成超大节目单时内存暴降 80% 以上，告别小内存设备卡死。
@@ -36,6 +45,7 @@
 
 - **📥 自动下载频道列表**：从广东移动IPTV服务器自动获取频道JSON数据（要求能访问183.235.0.0/16网段）
 - **🗂️ 智能频道分组**：自动将频道分类为央视、央视特色、广东、卫视、少儿、CGTN、华数咪咕、超清4k、广东地方台、其他等分组
+- **🕵️ 智能测活与画质探测 (New)**：自动清理死链，并为存活频道打上真实画质标签（依赖系统 FFprobe）。
 - **🔄 频道去重**：自动去除重复频道，多清晰度的剔除了标清频道，只保留高清/超清/4k版本
 - **🚫 黑名单过滤**：支持按标题关键词、频道代码(code)或播放链接(zteurl)过滤频道
 - **➕ 自定义频道合并**：通过 `config/custom_channels.json` 添加自定义频道
@@ -45,7 +55,7 @@
 
 ### 📋 M3U文件生成
 
-脚本会生成4个M3U文件：
+脚本会生成4个经过存活清洗的顶级 M3U 文件：
 
 1. **tv.m3u**：组播地址列表（原始组播地址）
 2. **tv2.m3u**：单播地址列表（通过msd_lite转换的组播地址，回看参数支持ok影视,mytv-android[电视直播]）
@@ -75,8 +85,10 @@
 
 ### 📝 日志文件
 
-- **log/channel_processing.log**：频道处理日志，记录去重、改名、黑名单过滤等操作
-- **log/epg_statistics.log**：EPG下载和合成统计信息
+- **log/channel_processing.log**：频道处理、合并、过滤日志。
+- **log/checker_final.log**：底层流并发测活与深度画质探测的运行日志。
+- **log/failed_channels.txt**：被系统判定为死链/假活源并剔除的频道清单及死因。
+- **log/epg_statistics.log**：EPG下载和合成统计信息。
 
 ## ⚙️ 配置说明
 
@@ -86,14 +98,6 @@
 2. `config/myconfig.json`（本地覆盖配置，优先级更高，不提交）
 
 如果 `config/myconfig.json` 中存在同名配置项，会覆盖 `config/config.json`。
-
-### 配置文件用法提示
-
-- `config/config.json`：放常用配置，建议提交到仓库。
-- `config/myconfig.json`：只放你本机差异项（例如本地 UDPXY、代理地址），优先级更高。
-- 高级参数默认值已内置在 `tv.py`，通常不需要改代码。
-- 这两个文件都必须是**标准 JSON**，不能写 `//` 或 `#` 注释。
-- 需要说明时，请写在 `"__usage__"` 字段或 README 文档里。
 
 ### 基本配置
 
@@ -119,18 +123,29 @@
 ]
 ```
 
-### ⏪ 回看模板配置
+### 🕵️ 智能测活与画质探测配置 (New)
+
+- 若需开启高级画质探测，**系统环境变量中必须安装 FFmpeg/FFprobe**（群晖用户推荐在套件中心安装 社区版本的 ffmpeg）。
+- linux直接安装对于包 ffmpeg (ffprobe 会随之自动安装)
+  `sudo apt install ffmpeg -y`
+
+在 `config/myconfig.json` 中配置：
 
 ```json
-# 标准回看模板（OK影视等）
-"CATCHUP_URL_TEMPLATE": "{prefix}/{ztecode}/index.m3u8?starttime=${{utc:yyyyMMddHHmmss}}&endtime=${{utcend:yyyyMMddHHmmss}}",
+# 是否启用对频道进行存活与质量检测
+"ENABLE_STREAM_CHECK": true,
 
-# KU9回看模板（酷9最新版）
-"CATCHUP_URL_KU9": "{prefix}/{ztecode}/index.m3u8?starttime=${{(b)yyyyMMddHHmmss|UTC}}&endtime=${{(e)yyyyMMddHHmmss|UTC}}",
+# 需要被检测的分组名称列表 (空列表 [] 则检测所有组，推荐只测不太稳定的外部分组)
+"CHECK_TARGET_GROUPS": ["港澳台"],
 
-#  添加APTV回看模板 (新增)
-"CATCHUP_URL_APTV": "{prefix}/{ztecode}/index.m3u8?starttime=${{(b)yyyyMMddHHmmss:utc}}&endtime=${{(e)yyyyMMddHHmmss:utc}}"
-```
+# 极速测活并发线程数 (群晖建议 4-8)
+"CHECK_WORKERS": 4,
+
+# 是否启用 ffprobe 进行 1080P/4K 画质深度探测 (耗时较长，但精准)
+"ENABLE_PROBE": true,
+
+# ffprobe 画质探测缓存过期时间(小时)。在此时间内重跑只测生死，不耗流量测画质
+"CHECK_CACHE_EXPIRE": 24
 
 ### 📺 EPG 防风控与多天配置
 
@@ -180,7 +195,7 @@
 - ✅ 外部 M3U 内部遇到“同 URL 不同别名”时，仅保留第一次出现的频道
 - ✅ 支持 Nginx 代理（如果设置了 `NGINX_PROXY_PREFIX`，外部频道的 URL 和 Logo 会自动通过代理）
 - ✅ 智能排序：如果外部分组在 `GROUP_OUTPUT_ORDER` 中，会按顺序输出；否则会添加到 M3U 文件末尾,同时应用分组内部排序
-- ✅ 合并到所有生成的 M3U 文件（tv.m3u、tv2.m3u、ku9.m3u、 ）
+- ✅ 合并到所有生成的 M3U 文件（tv.m3u、tv2.m3u、ku9.m3u）
 
 **⚠️ 注意事项**：
 
@@ -247,14 +262,12 @@
 
 频道排序配置文件，生成的m3u会优先按此列表进行排序，格式示例：
 
-```json
-{
+```{
     "央视": [
         "CCTV-1综合",
         "CCTV-2财经",
         "CCTV-3综艺"
     ],
-
     "广东": [
         "广东珠江高清",
         "广东体育高清",
@@ -275,7 +288,61 @@
 
 ### 1. 环境要求
 
-- 🐍 Python 3.x
+- 🐍 Python 3.8+ (必须安装 aiohttp 和 requests 库)
+
+```
+pip install -r requirements.txt
+```
+
+- 由于群晖默认 Python 3.8 功能受限，建议安装 Python 3.10 并使用虚拟环境：
+
+- 在项目目录创建虚拟环境（推荐命名 `venv310`）：
+
+```
+1. 创建虚拟环境
+在你的项目目录下执行（建议起名叫 venv310 以示区别）：
+Bash
+python3.10 -m venv venv310
+1. 激活环境
+执行后，你会看到命令行开头多了 (venv310) 标志：
+Bash
+source venv310/bin/activate
+1. 在环境内安装依赖
+注意： 激活环境后，直接用 pip 即可，它会自动指向 3.10
+Bash
+先升级下环境内部的 pip
+pip install --upgrade pip
+安装你的依赖
+pip install -r requirements.txt
+
+```
+
+- 任务计划
+
+```
+#!/bin/bash
+# 1. 定义变量，方便以后修改路径
+PROJECT_PATH="/volume1/web/IPTV/gemini"
+PYTHON_EXEC="$PROJECT_PATH/venv310/bin/python"
+
+# 2. 进入目录
+cd $PROJECT_PATH
+
+# 3. 运行脚本 (修正了你代码里的 tv. 为 tv.py)
+# 使用 >> 是追加日志，使用 > 是覆盖日志，建议用 > 保持日志文件不会无限变大
+$PYTHON_EXEC $PROJECT_PATH/tv.py > $PROJECT_PATH/auto.log 2>&1
+
+# 4. 权限修复
+# 加一个判断，防止目录下还没有 m3u 文件时 chmod 报错
+if ls $PROJECT_PATH/*.m3u >/dev/null 2>&1; then
+    chmod 777 $PROJECT_PATH/*.m3u
+    # 5. 踢醒 Drive 同步
+    touch $PROJECT_PATH/*.m3u
+fi
+
+# 6. 处理日志权限
+chmod 777 $PROJECT_PATH/auto.log
+```
 
 ### 2. 运行脚本
 
