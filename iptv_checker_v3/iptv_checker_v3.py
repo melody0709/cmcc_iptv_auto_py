@@ -8,6 +8,7 @@ import time
 import json
 import os
 from urllib.parse import urljoin
+from datetime import datetime, timezone, timedelta  # <-- 新增：用于处理 UTC+8 时间格式
 
 # ================= 动态路径与日志配置 =================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -111,7 +112,21 @@ class IPTVCheckerFinal:
                 
                 if original_url in self.cache_data:
                     cached = self.cache_data[original_url]
-                    if current_time - cached.get("last_probed", 0) < self.cache_expire_sec:
+                    
+                    # --- 新增：兼容解析旧版数字时间戳和新版UTC+8时间字符串 ---
+                    cached_time = cached.get("last_probed", 0)
+                    if isinstance(cached_time, str):
+                        try:
+                            dt = datetime.strptime(cached_time, '%Y-%m-%d %H:%M:%S')
+                            dt = dt.replace(tzinfo=timezone(timedelta(hours=8)))
+                            cached_time_int = int(dt.timestamp())
+                        except ValueError:
+                            cached_time_int = 0
+                    else:
+                        cached_time_int = cached_time
+                    # -----------------------------------------------------------
+                    
+                    if current_time - cached_time_int < self.cache_expire_sec:
                         res, codec = cached.get('resolution', ''), cached.get('codec', '')
                         if res == "Unknown" and codec == "Unknown":
                             channel['is_alive'] = False
@@ -138,13 +153,18 @@ class IPTVCheckerFinal:
                         self.cache_data[original_url] = info
                         logger.info(f"[🎯 探测成功] [{channel.get('name')}] -> {channel['probe_info']}")
                     else:
+                        # --- 新增：生成当前 UTC+8 时间格式字符串 ---
+                        tz_utc_8 = timezone(timedelta(hours=8))
+                        fmt_time = datetime.now(tz_utc_8).strftime('%Y-%m-%d %H:%M:%S')
+                        # ----------------------------------------
+                        
                         text_res = channel.get('text_res', '')
                         if text_res:
                             channel['probe_info'] = f"[{text_res}][M3U8]"
-                            self.cache_data[original_url] = {"resolution": text_res, "codec": "M3U8", "last_probed": current_time}
+                            self.cache_data[original_url] = {"resolution": text_res, "codec": "M3U8", "last_probed": fmt_time}
                             logger.info(f"[📝 文本保底成功] [{channel.get('name')}] -> {channel['probe_info']}")
                         else:
-                            self.cache_data[original_url] = {"resolution": "Unknown", "codec": "Unknown", "last_probed": current_time}
+                            self.cache_data[original_url] = {"resolution": "Unknown", "codec": "Unknown", "last_probed": fmt_time}
                             channel['is_alive'] = False
                             channel['msg'] = "深度探测彻底失败，无视频流"
                             failed_channels.append(channel)
@@ -233,7 +253,11 @@ class IPTVCheckerFinal:
                 elif height > 0: res_name = "标清"
                 else: res_name = "未知"
                 
-                return {"resolution": res_name, "codec": codec, "last_probed": int(time.time())}
+                # --- 新增：返回 UTC+8 格式化字符串 ---
+                tz_utc_8 = timezone(timedelta(hours=8))
+                fmt_time = datetime.now(tz_utc_8).strftime('%Y-%m-%d %H:%M:%S')
+                return {"resolution": res_name, "codec": codec, "last_probed": fmt_time}
+                # ------------------------------------
         except Exception: return None
         return None
 
