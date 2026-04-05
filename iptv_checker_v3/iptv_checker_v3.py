@@ -4,6 +4,7 @@ import argparse
 import logging
 import re
 import sys
+import io
 import time
 import json
 import os
@@ -24,6 +25,7 @@ formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datef
 if not logger.handlers:
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
+    console_handler.stream = io.TextIOWrapper(console_handler.stream.buffer, encoding='utf-8', errors='replace')
     logger.addHandler(console_handler)
 
     file_handler = logging.FileHandler(os.path.join(LOG_DIR, "checker_final.log"), mode='w', encoding='utf-8')
