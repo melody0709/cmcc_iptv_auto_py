@@ -68,7 +68,7 @@ python tv.py -se -sc -sp              # 可组合使用
   
 ## 版本与提交规则
 
-- 发布版本时必须同步更新三处：`CHANGELOG.md`、`README.md` 版本信息 。
+- 发布版本时至少同步更新：`CHANGELOG.md`、`README.md` 的版本信息；若子模块文档说明受影响，也要同步更新对应 README/CHANGELOG。
 - 不要提交生成的 M3U 文件、XML 文件、日志、缓存、虚拟环境（已在 `.gitignore` 中）。
 
 

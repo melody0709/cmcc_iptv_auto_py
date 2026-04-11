@@ -2,8 +2,14 @@
 
 全流程自动化的广东移动IPTV频道列表和EPG节目单抓取工具，支持频道分组、黑名单过滤、自定义频道合并、分组排序、回看功能等。
 
-**版本日期**: 2026.03.27
-**项目版本**: v1.4
+**版本日期**: 2026.04.11
+**项目版本**: v1.6
+
+### 更新: 外部 M3U 分组模糊匹配与稳定映射 (v1.6)
+
+- 外部 `group-title` 不再依赖严格相等；配置 `港澳台` 现在可匹配 `🔮港澳台直播`、`🔮[三网]港澳台直播` 等上游前缀变化场景。
+- `EXTERNAL_GROUP_TITLES` 使用字典映射时，改为基于命中的配置关键词做分组映射，避免源站改名后外部分组合并失效。
+- README 与默认配置示例已同步改为更稳定的关键词写法，降低后续维护成本。
 
 ### 更新: 允许你在运行命令时直接覆盖配置文件中的这几个核心开关 (v1.5)
 
@@ -182,7 +188,9 @@
 ```json
 # 外部 M3U 合并配置
 "EXTERNAL_M3U_URL": "https://bc.188766.xyz/?ip=&mishitong=true&mima=mianfeibuhuaqian&json=true",
-"EXTERNAL_GROUP_TITLES": ["粤语频道"],
+"EXTERNAL_GROUP_TITLES": {
+  "港澳台": "港澳台"
+},
 "ENABLE_EXTERNAL_M3U_MERGE": true,
 "CACHE_M3U_FILENAME": "cache.m3u"
 ```
@@ -190,7 +198,7 @@
 **配置说明**：
 
 - **EXTERNAL_M3U_URL**：外部 M3U 文件的下载地址，支持 HTTP/HTTPS 协议
-- **EXTERNAL_GROUP_TITLES**：要提取的频道分组列表，脚本会从外部 M3U 中提取这些 `group-title` 的频道
+- **EXTERNAL_GROUP_TITLES**：要提取的频道分组列表或映射，支持模糊匹配；规范化后只要有不少于 3 个连续相同字符/字母/数字即可命中，例如配置 `港澳台` 可匹配 `🔮港澳台直播`
 - **ENABLE_EXTERNAL_M3U_MERGE**：是否启用外部 M3U 合并功能，设置为 `False` 可禁用此功能
 - **CACHE_M3U_FILENAME**：外部 M3U 的本地缓存文件名，默认是 `cache.m3u`
 
@@ -198,7 +206,7 @@
 
 - ✅ 自动下载外部 M3U 文件（使用浏览器 User-Agent 避免 403 错误）
 - ✅ 默认优先网络更新，网络失败时自动回退到本地 `cache.m3u` 缓存
-- ✅ 按 `group-title` 过滤提取指定分组的频道
+- ✅ 按 `group-title` 模糊过滤提取指定分组的频道，兼容前缀或标签变化
 - ✅ 自动应用黑名单过滤规则
 - ✅ 外部 M3U 内部遇到“同 URL 不同别名”时，仅保留第一次出现的频道
 - ✅ 支持 Nginx 代理（如果设置了 `NGINX_PROXY_PREFIX`，外部频道的 URL 和 Logo 会自动通过代理）

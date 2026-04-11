@@ -88,10 +88,10 @@ CUSTOM_CHANNELS_FILE = os.path.join(CONFIG_DIR, "custom_channels.json")    # 自
 
 # 外部 M3U 合并配置
 EXTERNAL_M3U_URL = "https://raw.githubusercontent.com/Jsnzkpg/Jsnzkpg/Jsnzkpg/Jsnzkpg1.m3u"  
-# 要提取的 group-title 列表，例如: ["🔮[主用]港澳台直播", "港澳台"],部分粤语频道播放需要科学上网
-# 支持列表格式 ["A", "B"]，也支持频道盖帽映射的字典格式 {"A":"新A", "B":"新B"}
+# 要提取的 group-title 列表，例如: ["港澳台"]，支持模糊匹配；配置“港澳台”可匹配“🔮港澳台直播”
+# 支持列表格式 ["A", "B"]，也支持频道改名映射的字典格式 {"A":"新A", "B":"新B"}
 EXTERNAL_GROUP_TITLES = {
-    "🔮[主用]港澳台直播": "港澳台"
+    "港澳台": "港澳台"
 }
 ENABLE_EXTERNAL_M3U_MERGE = True  # 是否合并外部 M3U 到所有 M3U 文件 (True/False)
 CACHE_M3U_FILENAME = "cache.m3u"  # 外部 M3U 下载缓存文件名
@@ -168,6 +168,8 @@ NUMBER_PATTERN = re.compile(r'\d+')
 QUALITY_PATTERN = re.compile(r'(?:高清|超清|4K|\d+K)')  
 TVG_ID_CLEAN_PATTERN = re.compile(r'[_\s]*(高清|超清|4K)[_\s]*')  
 SPACE_DASH_PATTERN = re.compile(r'\s+-\s+')  
+EXTERNAL_GROUP_TOKEN_PATTERN = re.compile(r'[\u4e00-\u9fffA-Za-z0-9]+')
+MIN_EXTERNAL_GROUP_MATCH_LENGTH = 3
 MULTI_SPACE_PATTERN = re.compile(r'\s+')  
 
 # 魔法字符串和常量
@@ -301,7 +303,7 @@ def print_configuration():
     print(f"外部M3U合并开关: {'启用' if ENABLE_EXTERNAL_M3U_MERGE else '禁用'}")
     if ENABLE_EXTERNAL_M3U_MERGE:
         print(f"外部M3U地址: {EXTERNAL_M3U_URL}")
-        print(f"提取的分组: {', '.join(EXTERNAL_GROUP_TITLES) if EXTERNAL_GROUP_TITLES else '(未配置)'}")
+        print(f"提取的分组(支持模糊匹配): {', '.join(EXTERNAL_GROUP_TITLES) if EXTERNAL_GROUP_TITLES else '(未配置)'}")
     if ENABLE_STREAM_CHECK:
         print(f"智能检测开关: 启用 (分组: {CHECK_TARGET_GROUPS}, 探针画质: {ENABLE_PROBE})")
 
@@ -749,6 +751,41 @@ def normalize_external_channel_url(url):
     parsed = urlparse(str(url).strip())
     return parsed._replace(scheme=parsed.scheme.lower(), netloc=parsed.netloc.lower()).geturl() if parsed.scheme or parsed.netloc else str(url).strip()
 
+def normalize_external_group_title(title):
+    return ''.join(EXTERNAL_GROUP_TOKEN_PATTERN.findall(str(title or '').lower()))
+
+def has_shared_group_fragment(source_group, target_group, min_length=MIN_EXTERNAL_GROUP_MATCH_LENGTH):
+    source_normalized = normalize_external_group_title(source_group)
+    target_normalized = normalize_external_group_title(target_group)
+    if not source_normalized or not target_normalized:
+        return False
+    if source_normalized == target_normalized:
+        return True
+
+    shorter, longer = (source_normalized, target_normalized) if len(source_normalized) <= len(target_normalized) else (target_normalized, source_normalized)
+    if len(shorter) < min_length:
+        return False
+    if shorter in longer:
+        return True
+
+    for index in range(len(shorter) - min_length + 1):
+        if shorter[index:index + min_length] in longer:
+            return True
+    return False
+
+def match_external_group_title(group_title, target_groups):
+    source_group_title = str(group_title or '').strip()
+    if not source_group_title:
+        return None
+
+    for target_group in target_groups:
+        target_group_text = str(target_group or '').strip()
+        if not target_group_text:
+            continue
+        if source_group_title == target_group_text or has_shared_group_fragment(source_group_title, target_group_text):
+            return target_group_text
+    return None
+
 def download_external_m3u(url):
     try:
         print(f"正在下载外部 M3U 文件: {url}")
@@ -768,8 +805,9 @@ def download_external_m3u(url):
 
 def parse_m3u_content(m3u_content, target_groups):
     if not m3u_content or not target_groups: return [], [], []
-    target_groups_set = set(target_groups)
+    target_groups = [str(group).strip() for group in target_groups if str(group).strip()]
     channels, blacklisted_external_channels, duplicate_external_channels, seen_urls = [], [], [], set()
+    fuzzy_matched_groups = set()
     
     current_channel = None
     for line in m3u_content.strip().split('\n'):
@@ -783,7 +821,11 @@ def parse_m3u_content(m3u_content, target_groups):
             current_channel['extra_lines'].append(line)
         elif line and current_channel:
             current_channel['url'] = line
-            if current_channel['group_title'] in target_groups_set:
+            matched_group = match_external_group_title(current_channel['group_title'], target_groups)
+            if matched_group:
+                current_channel['matched_target_group'] = matched_group
+                if current_channel['group_title'] != matched_group:
+                    fuzzy_matched_groups.add((current_channel['group_title'], matched_group))
                 if is_blacklisted({'title': current_channel['title'], 'zteurl': current_channel['url']}):
                     blacklisted_external_channels.append({'title': current_channel['title'], 'reason': '黑名单规则匹配', 'source': '外部M3U'})
                 elif (norm_url := normalize_external_channel_url(line)) in seen_urls:
@@ -794,6 +836,9 @@ def parse_m3u_content(m3u_content, target_groups):
             current_channel = None
             
     print(f"从外部 M3U 中提取了 {len(channels)} 个频道 (目标分组: {', '.join(target_groups)})")
+    if fuzzy_matched_groups:
+        match_desc = ', '.join([f"'{source}' ~= '{target}'" for source, target in sorted(fuzzy_matched_groups)])
+        print(f"外部 M3U 分组模糊匹配: {match_desc}")
     if blacklisted_external_channels:
         print(f"已过滤 {len(blacklisted_external_channels)} 个黑名单外部频道")
     if duplicate_external_channels:
@@ -1074,11 +1119,16 @@ def main():
                     mapped_groups = set()
                     for ch in external_channels:
                         original_group = ch['group_title']
-                        if original_group in EXTERNAL_GROUP_TITLES:
-                            ch['group_title'] = ch['attributes']['group-title'] = EXTERNAL_GROUP_TITLES[original_group]
-                            mapped_groups.add(original_group)
+                        matched_group = ch.get('matched_target_group', original_group)
+                        if matched_group in EXTERNAL_GROUP_TITLES:
+                            mapped_group = EXTERNAL_GROUP_TITLES[matched_group]
+                            ch['group_title'] = ch['attributes']['group-title'] = mapped_group
+                            mapped_groups.add((original_group, matched_group, mapped_group))
                     if mapped_groups:
-                        mapping_desc = ', '.join([f"'{old}' -> '{EXTERNAL_GROUP_TITLES[old]}'" for old in mapped_groups])
+                        mapping_desc = ', '.join([
+                            f"'{source}' -> '{mapped}'" if source == matched else f"'{source}' 匹配 '{matched}' -> '{mapped}'"
+                            for source, matched, mapped in sorted(mapped_groups)
+                        ])
                         print(f"  映射外部频道分组: {mapping_desc}")
                 
                 if external_channels:

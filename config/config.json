@@ -16,7 +16,7 @@
   "ENABLE_NGINX_PROXY_FOR_TV": false,
   "EXTERNAL_M3U_URL": "https://raw.githubusercontent.com/Jsnzkpg/Jsnzkpg/Jsnzkpg/Jsnzkpg1.m3u",
   "EXTERNAL_GROUP_TITLES": {
-    "🔮[三网]港澳台直播": "港澳台"
+    "港澳台": "港澳台"
   },
   "ENABLE_EXTERNAL_M3U_MERGE": true,
   "CACHE_M3U_FILENAME": "cache.m3u"
