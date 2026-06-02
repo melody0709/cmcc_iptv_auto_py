@@ -8,7 +8,8 @@ import io
 import time
 import json
 import os
-from urllib.parse import urljoin
+import ssl
+from urllib.parse import urljoin, urlparse
 from datetime import datetime, timezone, timedelta  # <-- 新增：用于处理 UTC+8 时间格式
 
 # ================= 动态路径与日志配置 =================
@@ -70,6 +71,202 @@ class IPTVCheckerFinal:
             with open(self.cache_file, 'w', encoding='utf-8') as f:
                 json.dump(self.cache_data, f, ensure_ascii=False, indent=2)
         except Exception: pass
+
+    def _is_playlist_like_url(self, url):
+        url_lower = str(url or "").lower()
+        return any(token in url_lower for token in (".m3u8", ".m3u", "playlist", "manifest"))
+
+    def _is_html_payload(self, data):
+        data_lower = (data or b"").lower()
+        return b'<html' in data_lower and b'<body' in data_lower
+
+    def _looks_like_ts_payload(self, data):
+        if not data:
+            return False
+        sample = data[:188 * 4]
+        if len(sample) < 188:
+            return False
+        sync_hits = 0
+        for offset in range(min(188, len(sample))):
+            if sample[offset:offset + 1] != b'\x47':
+                continue
+            if len(sample) > offset + 188 and sample[offset + 188:offset + 189] == b'\x47':
+                sync_hits += 1
+            if len(sample) > offset + 376 and sample[offset + 376:offset + 377] == b'\x47':
+                sync_hits += 1
+            if sync_hits >= 2:
+                return True
+        return False
+
+    def _parse_http_header_block(self, header_blob):
+        status_code = None
+        headers = {}
+        if not header_blob:
+            return status_code, headers
+
+        lines = header_blob.split(b'\r\n')
+        if lines:
+            status_line = lines[0].decode('iso-8859-1', errors='ignore')
+            status_match = re.match(r'^HTTP/\d(?:\.\d)?\s+(\d+)', status_line)
+            if status_match:
+                status_code = int(status_match.group(1))
+
+        for raw_line in lines[1:]:
+            if b':' not in raw_line:
+                continue
+            key, value = raw_line.split(b':', 1)
+            headers[key.decode('iso-8859-1', errors='ignore').strip().lower()] = value.decode('iso-8859-1', errors='ignore').strip()
+        return status_code, headers
+
+    async def _read_socket_response(self, parsed, request_bytes, read_timeout):
+        reader = writer = None
+        try:
+            ssl_context = None
+            server_hostname = None
+            if parsed.scheme == 'https':
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                server_hostname = parsed.hostname
+
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(
+                    parsed.hostname,
+                    parsed.port or (443 if parsed.scheme == 'https' else 80),
+                    ssl=ssl_context,
+                    server_hostname=server_hostname
+                ),
+                timeout=read_timeout
+            )
+            writer.write(request_bytes)
+            await writer.drain()
+
+            chunks = []
+            total_bytes = 0
+            for _ in range(6):
+                chunk = await asyncio.wait_for(reader.read(2048), timeout=read_timeout)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total_bytes += len(chunk)
+                if total_bytes >= 8192:
+                    break
+            return b''.join(chunks)
+        finally:
+            if writer is not None:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+
+    async def _fetch_via_socket(self, url, max_redirects=5):
+        current_url = url
+        redirect_chain = []
+
+        for _ in range(max_redirects + 1):
+            parsed = urlparse(current_url)
+            if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+                return {"ok": False, "error": f"socket 不支持的URL: {current_url}", "chain": redirect_chain}
+
+            path = parsed.path or '/'
+            if parsed.query:
+                path = f"{path}?{parsed.query}"
+
+            request = (
+                f"GET {path} HTTP/1.1\r\n"
+                f"Host: {parsed.netloc}\r\n"
+                f"User-Agent: {self.headers['User-Agent']}\r\n"
+                "Accept: */*\r\n"
+                "Accept-Encoding: identity\r\n"
+                "Connection: close\r\n\r\n"
+            ).encode('utf-8', errors='ignore')
+
+            raw = await self._read_socket_response(parsed, request, max(1.0, self.timeout / 2))
+            if not raw:
+                return {"ok": False, "error": "socket 未返回数据", "chain": redirect_chain}
+
+            header_blob, separator, body = raw.partition(b'\r\n\r\n')
+            if separator:
+                status_code, headers = self._parse_http_header_block(header_blob)
+            else:
+                status_code, headers = None, {}
+                body = raw
+
+            if status_code in [301, 302, 303, 307, 308]:
+                location = headers.get('location')
+                if not location:
+                    return {"ok": False, "error": f"socket 缺少跳转地址: {status_code}", "chain": redirect_chain}
+                redirect_chain.append(str(status_code))
+                current_url = urljoin(current_url, location)
+                continue
+
+            return {
+                "ok": True,
+                "url": current_url,
+                "status_code": status_code,
+                "headers": headers,
+                "body": body,
+                "chain": redirect_chain
+            }
+
+        return {"ok": False, "error": f"socket 跳转过多: {'->'.join(redirect_chain)}", "chain": redirect_chain}
+
+    async def _socket_http_probe(self, channel):
+        """
+        某些 HTTP 裸流服务端返回并不完全符合 aiohttp 的解析预期，
+        但播放器仍可正常消费。这里只对这类 URL 做一次异步 socket 回退，
+        避免整批误杀。
+        """
+        url = channel.get('url', '')
+        parsed = urlparse(url)
+        if parsed.scheme != 'http' or self._is_playlist_like_url(url):
+            return False, "不适用 socket 回退"
+
+        host = parsed.hostname
+        if not host:
+            return False, "URL 缺少主机名"
+
+        try:
+            socket_result = await self._fetch_via_socket(url)
+            if not socket_result.get("ok"):
+                return False, socket_result.get("error", "socket 未知异常")
+
+            final_url = socket_result.get("url", url)
+            status_code = socket_result.get("status_code")
+            body = socket_result.get("body", b"")
+            redirect_chain = socket_result.get("chain", [])
+            redirect_suffix = f"/{'->'.join(redirect_chain)}" if redirect_chain else ""
+
+            if status_code is not None and status_code not in [200, 206]:
+                return False, f"socket HTTP异常: {status_code}{redirect_suffix}"
+
+            if b'#EXTM3U' in body:
+                text_str = body.decode('utf-8', errors='ignore')
+                res_match = re.search(r'RESOLUTION=(\d+)x(\d+)', text_str)
+                if res_match:
+                    h = int(res_match.group(2))
+                    if h >= 2160: channel['text_res'] = "4K"
+                    elif h >= 1080: channel['text_res'] = "1080P"
+                    elif h >= 720: channel['text_res'] = "720P"
+                    else: channel['text_res'] = "标清"
+
+                first_link = next((line.strip() for line in text_str.split('\n') if line.strip() and not line.startswith('#')), None)
+                channel['probe_url'] = urljoin(final_url, first_link) if first_link else final_url
+                return True, f"存活 (M3U8/socket回退{redirect_suffix})"
+
+            if self._is_html_payload(body):
+                return False, "socket 命中防盗链网页"
+
+            if len(body) > 100 or self._looks_like_ts_payload(body):
+                channel['probe_url'] = final_url
+                return True, f"存活 (裸流/socket回退{redirect_suffix})"
+
+            return False, f"socket 数据异常过小: {len(body)} bytes"
+        except asyncio.TimeoutError:
+            return False, "socket 超时"
+        except Exception as e:
+            return False, f"socket 异常: {type(e).__name__}:{e}"
 
     # ================= 纯内存处理核心 API =================
     async def process_channel_list(self, channels):
@@ -224,8 +421,13 @@ class IPTVCheckerFinal:
                         return True, channel, f"存活 (裸流)"
                     else: return False, channel, "数据异常过小"
 
-            except asyncio.TimeoutError: return False, channel, "请求/读取超时"
-            except Exception: return False, channel, "网络异常"
+            except asyncio.TimeoutError:
+                return False, channel, "请求/读取超时"
+            except Exception as e:
+                socket_alive, socket_msg = await self._socket_http_probe(channel)
+                if socket_alive:
+                    return True, channel, socket_msg
+                return False, channel, f"网络异常({type(e).__name__}: {e}; {socket_msg})"
 
     async def probe_video_info(self, probe_url):
         cmd = [
