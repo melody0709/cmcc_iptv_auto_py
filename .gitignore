@@ -26,4 +26,5 @@ config/probe_cache.json
 
 web_raw.m3u
 web.m3u
+lan_raw.m3u
 
