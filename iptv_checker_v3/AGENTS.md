@@ -33,28 +33,30 @@ Every channel is a dictionary. When modifying the code, ensure these keys are ma
 
 ### Step 1: 极速测活 (`check_stream_alive`)
 - Uses `aiohttp` with configurable concurrency (`workers`, default 30 in CLI, 4 in `tv.py`).
-- Detects M3U8 playlists: parses `RESOLUTION=` tag, tests first `.ts` slice.
-- Detects raw streams (TS/UDP): checks chunk size > 100 bytes.
-- Rejects: HTML pages (anti-leech), empty responses, timeouts.
+- Detects M3U8 playlists recursively: prefers the highest-bandwidth playable variant, tests up to three newest media slices, and parses the selected variant's `RESOLUTION=` tag.
+- Validates slice bodies instead of trusting HTTP 200 alone; rejects HTML/JSON/text error payloads and empty slices. A stale `Last-Modified` header is only a hint and must not override a valid latest slice.
+- Detects raw streams (TS/FLV/fMP4 and related magic bytes). The existing chunk-size > 100 bytes rule remains as weak fallback evidence for unusual raw streams.
+- Falls back to a bounded async HTTP/HTTPS socket probe when `aiohttp` rejects a response that a player may still consume.
 
 ### Step 2: 终极质量探测 (`probe_video_info`)
 - Uses `ffprobe` subprocess with 15s timeout.
 - **Three-layer fallback** (do NOT simplify):
-  1. Probe `probe_url` (extracted `.ts` slice)
+  1. Refresh and probe `probe_url` (latest extracted media slice)
   2. If failed, fallback to original `url` (full M3U8)
   3. If both fail, use `text_res` (regex-parsed resolution from M3U8 text) as last resort
 - Cache: `probe_cache.json` with 24h expiry (configurable). Stores UTC+8 formatted timestamps.
-- Channels cached as `"Unknown"/"Unknown"` are marked dead and removed.
+- Cache only successful ffprobe/text-resolution results. Apply valid positive cache entries before checking ffprobe availability. Legacy `"Unknown"/"Unknown"` entries are invalidated and reprobed; a quality-probe timeout or missing ffprobe must not override strong Step 1 liveness evidence.
+- ffprobe subprocesses must be explicitly killed and awaited after timeout so timed-out MPEG-TS probes cannot remain orphaned.
 
 ## 4. Critical Constraints
 
 - **Async safety**: `check_stream_alive` uses `aiohttp.ClientSession` with `TCPConnector(ssl=False)`. Never block the event loop.
-- **Magic Bytes detection**: M3U8 detection uses `b'#EXTM3U'`, HTML detection uses `b'<html'` + `b'<body'`. The 100-byte threshold for raw stream detection is tuned for MPEG-TS. Do not change without testing.
+- **Magic Bytes detection**: M3U8 detection accepts an optional UTF-8 BOM/leading whitespace before `b'#EXTM3U'`; HTML/JSON/text errors are rejected before raw fallback. The 100-byte threshold for raw stream detection is tuned for MPEG-TS and remains in place as weak evidence. Do not change without testing.
 - **Semaphore limits**: `probe_worker` uses `Semaphore(4)` — hardcoded to prevent ffprobe overload. Do not increase without good reason.
-- **Logger**: Uses `logging.StreamHandler(sys.stdout)` with UTF-8 wrapper. The `if not logger.handlers` guard prevents duplicate handlers when imported by `tv.py`.
-- **Windows event loop**: CLI mode sets `WindowsSelectorEventLoopPolicy` on `win32`. API mode relies on caller's event loop setup.
+- **Logger**: Uses `logging.StreamHandler(sys.stdout)` with UTF-8 wrapper. The `if not logger.handlers` guard prevents duplicate handlers when imported by `tv.py`. Tests set `IPTV_CHECKER_DISABLE_FILE_LOG=1` before import so they never truncate the operational log.
+- **Windows event loop**: ffprobe uses asyncio subprocesses and therefore requires `WindowsProactorEventLoopPolicy` on `win32`. CLI mode and `tv.py` select Proactor when probing is enabled; non-probe mode may continue using Selector.
 
 ## 5. File Locations
 
-- Cache: `config/probe_cache.json` (preferred) or `probe_cache.json` (fallback).
+- Cache: repository `config/probe_cache.json` (preferred), module `config/probe_cache.json`, or legacy module `probe_cache.json` (read/migration fallback).
 - Logs: `log/checker_final.log`, `log/failed_channels.txt`.

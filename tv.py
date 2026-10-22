@@ -149,7 +149,7 @@ GROUP_DEFINITIONS = {
     "广东": ["广东", "大湾区", "经济科教", "南方", "岭南", "现代教育", "移动频道"],
     "卫视": ["卫视"],
     "少儿": ["少儿", "卡通", "动画", "教育"],
-    "华数咪咕": ["爱", "睛彩", "IPTV", "咪咕", "热播", "经典", "魅力"],
+    "华数咪咕": ["爱", "睛彩", "IPTV", "咪咕", "热播", "经典", "魅力","CHC", "体坛", "四海","最强","新片"],
     "超高清4k": ["4k", "4K"],
     "广东地方台": [],
     "其他": []
@@ -994,7 +994,12 @@ def run_smart_checker(grouped_channels, external_channels):
         return grouped_channels, external_channels
 
     # 异步执行内存检测
-    if sys.platform == 'win32': asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    if sys.platform == 'win32':
+        event_loop_policy = (
+            asyncio.WindowsProactorEventLoopPolicy()
+            if ENABLE_PROBE else asyncio.WindowsSelectorEventLoopPolicy()
+        )
+        asyncio.set_event_loop_policy(event_loop_policy)
     processed_channels = asyncio.run(checker.process_channel_list(channels_to_check))
     
     # 升维回写结果

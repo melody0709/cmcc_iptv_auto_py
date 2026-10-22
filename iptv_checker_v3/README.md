@@ -8,21 +8,24 @@ IPTV Checker V3 专为 NAS（如 Synology）与高阶用户打造，支持批量
 
 - 极速测活
   - 基于 `aiohttp` 异步架构，4KB 魔法字节快速判断有效性
-  - 自动处理 M3U8 和裸流
-  - 检测防盗链网页/空流/响应异常
+  - 递归处理主/子 M3U8，优先验证可播的高码率变体
+  - 从最新切片向前回退，读取切片实体，不再仅凭 HTTP 200 判活
+  - 自动识别 TS、FLV、fMP4 等裸流魔法字节
+  - 检测防盗链网页、JSON/文本错误、空流和响应异常；疑似停更头部仅作提示，最终以实际切片为准
 
 - 深度画质探测（可选）
   - 调用系统 `ffprobe` 提取视频流 `resolution` 与 `codec`
   - 缩短探测时间并避免高 CPU 负载
   - 自动回退:
-    1. 直接 probe 地址
-    2. M3U8 切片检测
-    3. 解析 M3U8 文本标签
+    1. 刷新并直探最新媒体切片
+    2. 回退原始 M3U8/原始流地址
+    3. 解析 M3U8 文本分辨率标签
+  - ffprobe 超时会主动终止子进程；探测不确定时不会推翻已有的强存活证据
 
 - 本地缓存机制
   - 结果写入 `config/probe_cache.json`
   - 默认缓存有效期 24 小时
-  - 已判定死流源自动跳过
+  - 只缓存成功的画质结果；正缓存不依赖本轮 ffprobe 是否可用，旧版 `Unknown/Unknown` 负缓存自动失效并重新探测
 
 - 自包含 API + CLI
   - 可直接调用 `IPTVCheckerFinal` 进行内存列表处理
@@ -106,6 +109,16 @@ for ch in processed:
 - 错误日志请查看 `log/checker_final.log`
 - 若需刷新画质信息，删除 `config/probe_cache.json`
 - 并发数过高可能导致部分源被限流或返回 403，建议根据网络/设备情况调节
+- 公网或跨境源建议 `timeout >= 5`；3 秒以下容易把正常缓冲/握手误判为超时
+- Windows 启用深度探测时必须使用 Proactor 事件循环；`tv.py` 与本工具 CLI 已自动处理
+
+## 回归测试
+
+```bash
+python -m unittest -v iptv_checker_v3/test_iptv_checker_v3.py
+```
+
+测试使用本机临时 `aiohttp` 服务模拟滚动 HLS、过期切片、HTTP 200 错误页、弱二进制假流、ffprobe 超时和旧负缓存，不依赖公网直播源，并通过 `IPTV_CHECKER_DISABLE_FILE_LOG=1` 隔离生产日志。
 
 ## 许可证
 

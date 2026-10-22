@@ -8,7 +8,9 @@ import io
 import time
 import json
 import os
+import shutil
 import ssl
+from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin, urlparse
 from datetime import datetime, timezone, timedelta  # <-- 新增：用于处理 UTC+8 时间格式
 
@@ -16,6 +18,7 @@ from datetime import datetime, timezone, timedelta  # <-- 新增：用于处理 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR = os.path.join(BASE_DIR, "log")
 os.makedirs(LOG_DIR, exist_ok=True)  # 自动创建 log 目录
+DISABLE_FILE_LOG = os.environ.get("IPTV_CHECKER_DISABLE_FILE_LOG") == "1"
 
 # 统一配置 Logger
 logger = logging.getLogger("IPTV_Checker_Final")
@@ -29,9 +32,10 @@ if not logger.handlers:
     console_handler.stream = io.TextIOWrapper(console_handler.stream.buffer, encoding='utf-8', errors='replace')
     logger.addHandler(console_handler)
 
-    file_handler = logging.FileHandler(os.path.join(LOG_DIR, "checker_final.log"), mode='w', encoding='utf-8')
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
+    if not DISABLE_FILE_LOG:
+        file_handler = logging.FileHandler(os.path.join(LOG_DIR, "checker_final.log"), mode='w', encoding='utf-8')
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
 # ======================================================
 
 class IPTVCheckerFinal:
@@ -43,13 +47,22 @@ class IPTVCheckerFinal:
         
         self.enable_probe = enable_probe
         self.cache_expire_sec = cache_expire_hours * 3600
+        self.probe_timeout = 15.0
+        self.ffprobe_path = shutil.which('ffprobe') if enable_probe else None
         
         # 缓存文件优先放在 config 目录，没有则放当前目录
-        config_dir = os.path.join(BASE_DIR, "config")
-        if os.path.exists(config_dir):
-            self.cache_file = os.path.join(config_dir, "probe_cache.json")
+        project_config_dir = os.path.join(os.path.dirname(BASE_DIR), "config")
+        module_config_dir = os.path.join(BASE_DIR, "config")
+        if os.path.isdir(project_config_dir):
+            self.cache_file = os.path.join(project_config_dir, "probe_cache.json")
+        elif os.path.isdir(module_config_dir):
+            self.cache_file = os.path.join(module_config_dir, "probe_cache.json")
         else:
             self.cache_file = os.path.join(BASE_DIR, "probe_cache.json")
+        self.legacy_cache_files = [
+            os.path.join(BASE_DIR, "probe_cache.json"),
+            os.path.join(module_config_dir, "probe_cache.json"),
+        ]
             
         self.cache_data = self.load_cache()
         
@@ -60,25 +73,85 @@ class IPTVCheckerFinal:
         }
 
     def load_cache(self):
-        if not os.path.exists(self.cache_file): return {}
-        try:
-            with open(self.cache_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception: return {}
+        cache_candidates = [self.cache_file]
+        cache_candidates.extend(
+            path for path in getattr(self, 'legacy_cache_files', [])
+            if path not in cache_candidates
+        )
+        for cache_path in cache_candidates:
+            if not os.path.exists(cache_path):
+                continue
+            try:
+                with open(cache_path, 'r', encoding='utf-8') as f:
+                    cache_data = json.load(f)
+                if isinstance(cache_data, dict):
+                    return cache_data
+            except Exception as e:
+                logger.warning(f"画质缓存读取失败，将忽略并重建: {cache_path} ({type(e).__name__}: {e})")
+        return {}
 
     def save_cache(self):
         try:
+            os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
             with open(self.cache_file, 'w', encoding='utf-8') as f:
                 json.dump(self.cache_data, f, ensure_ascii=False, indent=2)
-        except Exception: pass
+        except Exception as e:
+            logger.warning(f"画质缓存写入失败: {self.cache_file} ({type(e).__name__}: {e})")
 
     def _is_playlist_like_url(self, url):
         url_lower = str(url or "").lower()
         return any(token in url_lower for token in (".m3u8", ".m3u", "playlist", "manifest"))
 
     def _is_html_payload(self, data):
-        data_lower = (data or b"").lower()
-        return b'<html' in data_lower and b'<body' in data_lower
+        data_lower = (data or b"").lstrip().lower()
+        return (
+            data_lower.startswith(b'<!doctype html')
+            or data_lower.startswith(b'<html')
+            or (b'<html' in data_lower and b'<body' in data_lower)
+        )
+
+    def _is_hls_playlist_payload(self, data):
+        sample = data or b""
+        if sample.startswith(b'\xef\xbb\xbf'):
+            sample = sample[3:]
+        return sample.lstrip(b' \t\r\n').startswith(b'#EXTM3U')
+
+    def _get_header(self, headers, name, default=""):
+        if not headers:
+            return default
+        return headers.get(name, headers.get(name.lower(), default))
+
+    def _is_mostly_text(self, data):
+        sample = (data or b"")[:512]
+        if not sample:
+            return False
+        printable = sum(
+            1 for value in sample
+            if value in (9, 10, 13) or 32 <= value <= 126
+        )
+        return printable / len(sample) >= 0.90
+
+    def _is_text_error_payload(self, data, content_type=""):
+        if not data or self._is_hls_playlist_payload(data):
+            return False
+        content_type = (content_type or "").split(';', 1)[0].strip().lower()
+        sample = data[:512].lstrip().lower()
+        if self._is_html_payload(data):
+            return True
+        if content_type.startswith('text/'):
+            return True
+        if content_type in {
+            'application/json', 'application/problem+json',
+            'application/xml', 'application/xhtml+xml',
+        }:
+            return True
+        if sample.startswith((b'{', b'[', b'<?xml')):
+            return True
+        if self._is_mostly_text(data) and sample.startswith(
+            (b'error', b'forbidden', b'unauthorized', b'access denied')
+        ):
+            return True
+        return False
 
     def _looks_like_ts_payload(self, data):
         if not data:
@@ -86,10 +159,10 @@ class IPTVCheckerFinal:
         sample = data[:188 * 4]
         if len(sample) < 188:
             return False
-        sync_hits = 0
         for offset in range(min(188, len(sample))):
             if sample[offset:offset + 1] != b'\x47':
                 continue
+            sync_hits = 0
             if len(sample) > offset + 188 and sample[offset + 188:offset + 189] == b'\x47':
                 sync_hits += 1
             if len(sample) > offset + 376 and sample[offset + 376:offset + 377] == b'\x47':
@@ -97,6 +170,459 @@ class IPTVCheckerFinal:
             if sync_hits >= 2:
                 return True
         return False
+
+    def _looks_like_media_payload(self, data):
+        if not data:
+            return False
+        if self._looks_like_ts_payload(data):
+            return True
+
+        sample = data[:32]
+        if sample.startswith((b'FLV', b'OggS', b'ID3', b'RIFF')):
+            return True
+        if sample.startswith((b'\x1a\x45\xdf\xa3', b'\x30\x26\xb2\x75\x8e\x66\xcf\x11')):
+            return True
+        if sample.startswith((b'\x00\x00\x01\xba', b'\x00\x00\x00\x01', b'\x00\x00\x01')):
+            return True
+        if len(sample) >= 8 and sample[4:8] in (b'ftyp', b'styp', b'moof', b'mdat'):
+            return True
+        if len(sample) >= 2 and sample[0] == 0xff and sample[1] & 0xf0 == 0xf0:
+            return True
+        return False
+
+    def _classify_media_payload(self, data, content_type="", hls_segment=False):
+        if not data:
+            return False, "none", "未返回媒体数据"
+        if self._looks_like_media_payload(data):
+            if len(data) <= 100:
+                return False, "none", f"数据异常过小: {len(data)} bytes"
+            return True, "strong", "命中媒体魔法字节"
+        if self._is_text_error_payload(data, content_type):
+            return False, "text", "响应为文本/错误页"
+
+        content_type = (content_type or "").split(';', 1)[0].strip().lower()
+        strong_media_content_type = (
+            content_type.startswith(('video/', 'audio/'))
+            or content_type in {
+                'application/mp2t', 'application/x-mpegts',
+                'application/vnd.rn-realmedia',
+            }
+        )
+        if len(data) > 100 and strong_media_content_type:
+            return True, "weak", f"仅命中媒体类型 {content_type}"
+        if len(data) > 100 and hls_segment and not self._is_mostly_text(data):
+            return True, "weak", "HLS 未识别二进制切片"
+        if len(data) > 100:
+            return True, "weak", "仅满足裸流长度阈值"
+        return False, "none", f"数据异常过小: {len(data)} bytes"
+
+    def _set_text_resolution(self, channel, height):
+        if height >= 2160:
+            channel['text_res'] = "4K"
+        elif height >= 1080:
+            channel['text_res'] = "1080P"
+        elif height >= 720:
+            channel['text_res'] = "720P"
+        else:
+            channel['text_res'] = "标清"
+
+    def _update_text_resolution(self, channel, playlist_text):
+        heights = [
+            int(height)
+            for _, height in re.findall(
+                r'RESOLUTION\s*=\s*(\d+)x(\d+)', playlist_text, flags=re.IGNORECASE
+            )
+        ]
+        if heights:
+            self._set_text_resolution(channel, max(heights))
+
+    def _extract_uri_attribute(self, line):
+        match = re.search(r'(?:^|[:,])URI=(?:"([^"]+)"|([^,]+))', line, flags=re.IGNORECASE)
+        if not match:
+            return None
+        return (match.group(1) or match.group(2) or "").strip()
+
+    def _parse_hls_playlist(self, playlist_text):
+        variants, segments, parts = [], [], []
+        pending_variant = None
+        for raw_line in playlist_text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            upper_line = line.upper()
+            if upper_line.startswith('#EXT-X-STREAM-INF:'):
+                pending_variant = line
+                continue
+            if upper_line.startswith('#EXT-X-PART:'):
+                part_uri = self._extract_uri_attribute(line)
+                if part_uri:
+                    parts.append(part_uri)
+                continue
+            if upper_line.startswith('#EXT-X-PRELOAD-HINT:') and 'TYPE=PART' in upper_line:
+                part_uri = self._extract_uri_attribute(line)
+                if part_uri:
+                    parts.append(part_uri)
+                continue
+            if line.startswith('#'):
+                continue
+
+            if pending_variant:
+                bandwidth_match = re.search(
+                    r'(?:^|[:,])BANDWIDTH=(\d+)', pending_variant, flags=re.IGNORECASE
+                )
+                bandwidth = int(bandwidth_match.group(1)) if bandwidth_match else 0
+                resolution_match = re.search(
+                    r'RESOLUTION\s*=\s*(\d+)x(\d+)',
+                    pending_variant,
+                    flags=re.IGNORECASE,
+                )
+                height = int(resolution_match.group(2)) if resolution_match else 0
+                variants.append((bandwidth, height, line))
+                pending_variant = None
+            else:
+                segments.append(line)
+
+        variants.sort(key=lambda item: item[0], reverse=True)
+        return variants, segments, parts
+
+    def _select_hls_variants(self, variants):
+        if len(variants) <= 3:
+            return variants
+        selected = [variants[0], variants[len(variants) // 2], variants[-1]]
+        return list(dict.fromkeys(selected))
+
+    def _is_stale_live_playlist(self, playlist_text, headers):
+        playlist_upper = playlist_text.upper()
+        if (
+            '#EXT-X-ENDLIST' in playlist_upper
+            or '#EXT-X-MEDIA-SEQUENCE' not in playlist_upper
+        ):
+            return False
+        date_value = self._get_header(headers, 'Date')
+        modified_value = self._get_header(headers, 'Last-Modified')
+        if not date_value or not modified_value:
+            return False
+        try:
+            server_date = parsedate_to_datetime(date_value)
+            last_modified = parsedate_to_datetime(modified_value)
+            age_seconds = (server_date - last_modified).total_seconds()
+        except (TypeError, ValueError, OverflowError):
+            return False
+
+        target_match = re.search(
+            r'#EXT-X-TARGETDURATION\s*:\s*([0-9.]+)', playlist_text, flags=re.IGNORECASE
+        )
+        try:
+            target_duration = float(target_match.group(1)) if target_match else 0.0
+        except ValueError:
+            target_duration = 0.0
+        stale_after = max(120.0, target_duration * 12)
+        return age_seconds > stale_after
+
+    async def _read_limited_content(self, content, limit, initial=b""):
+        chunks = [initial] if initial else []
+        total_bytes = len(initial)
+        while total_bytes < limit and not content.at_eof():
+            chunk = await content.read(min(4096, limit - total_bytes))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total_bytes += len(chunk)
+        return b''.join(chunks)
+
+    async def _read_to_minimum(self, content, initial, minimum=101, limit=4096):
+        chunks = [initial]
+        total_bytes = len(initial)
+        while total_bytes < minimum and total_bytes < limit and not content.at_eof():
+            chunk = await content.read(min(1024, limit - total_bytes))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total_bytes += len(chunk)
+        return b''.join(chunks)
+
+    async def _check_hls_playlist(
+        self, session, channel, playlist_url, playlist_data, playlist_headers=None,
+        depth=0, visited=None
+    ):
+        if depth > 3:
+            return False, "M3U8 层级过深"
+        visited = visited or set()
+        if playlist_url in visited:
+            return False, "M3U8 出现循环引用"
+        visited.add(playlist_url)
+
+        try:
+            playlist_text = playlist_data.decode('utf-8-sig', errors='ignore')
+        except Exception:
+            return False, "M3U8 文本解码失败"
+        if not self._is_hls_playlist_payload(playlist_data):
+            return False, "响应不是有效 M3U8"
+        if self._is_stale_live_playlist(playlist_text, playlist_headers):
+            channel['_playlist_stale_hint'] = True
+            logger.debug(f"M3U8 响应头疑似停更，继续验证实际切片: {playlist_url}")
+
+        variants, segments, parts = self._parse_hls_playlist(playlist_text)
+        if not variants:
+            self._update_text_resolution(channel, playlist_text)
+        request_timeout = aiohttp.ClientTimeout(
+            total=max(2.0, float(self.timeout)),
+            connect=max(1.0, float(self.timeout)),
+        )
+        errors = []
+
+        # 主播放列表先递归到实际媒体列表，最多尝试三个码率，防止单个清晰度失效。
+        for _, variant_height, variant_uri in self._select_hls_variants(variants):
+            if variant_height:
+                self._set_text_resolution(channel, variant_height)
+            target_url = urljoin(playlist_url, variant_uri)
+            request_headers = dict(self.headers)
+            request_headers['Referer'] = playlist_url
+            try:
+                async with session.get(
+                    target_url, headers=request_headers, timeout=request_timeout,
+                    ssl=False, allow_redirects=True
+                ) as variant_resp:
+                    if variant_resp.status not in [200, 206]:
+                        errors.append(f"子列表HTTP {variant_resp.status}")
+                        continue
+                    first_chunk = await variant_resp.content.read(4096)
+                    if not first_chunk:
+                        errors.append("子列表为空")
+                        continue
+                    if len(first_chunk) <= 100:
+                        first_chunk = await self._read_to_minimum(
+                            variant_resp.content, first_chunk
+                        )
+                    final_variant_url = str(variant_resp.url)
+                    content_type = self._get_header(variant_resp.headers, 'Content-Type')
+                    if self._is_hls_playlist_payload(first_chunk):
+                        child_data = await self._read_limited_content(
+                            variant_resp.content, 64 * 1024, first_chunk
+                        )
+                        alive, msg = await self._check_hls_playlist(
+                            session, channel, final_variant_url, child_data,
+                            variant_resp.headers, depth + 1, visited.copy()
+                        )
+                        if alive:
+                            return True, msg
+                        errors.append(msg)
+                        continue
+
+                    valid, evidence, reason = self._classify_media_payload(
+                        first_chunk, content_type, hls_segment=True
+                    )
+                    if valid:
+                        channel['probe_url'] = final_variant_url
+                        channel['_probe_referer'] = playlist_url
+                        channel['_liveness_evidence'] = evidence
+                        return True, "存活 (M3U8媒体变体)"
+                    errors.append(reason)
+            except asyncio.TimeoutError:
+                errors.append("子列表超时")
+            except Exception as e:
+                errors.append(f"子列表异常:{type(e).__name__}")
+
+        # 直播窗口里的第一片往往最老、最容易刚好过期，因此从最新切片向前回退。
+        media_candidates = list(reversed(segments[-3:]))
+        media_candidates.extend(reversed(parts[-3:]))
+        for media_uri in media_candidates:
+            target_url = urljoin(playlist_url, media_uri)
+            request_headers = dict(self.headers)
+            request_headers['Referer'] = playlist_url
+            try:
+                async with session.get(
+                    target_url, headers=request_headers, timeout=request_timeout,
+                    ssl=False, allow_redirects=True
+                ) as seg_resp:
+                    if seg_resp.status not in [200, 206]:
+                        errors.append(f"切片HTTP {seg_resp.status}")
+                        continue
+                    segment_data = await seg_resp.content.read(4096)
+                    if not segment_data:
+                        errors.append("切片为空")
+                        continue
+                    if len(segment_data) <= 100:
+                        segment_data = await self._read_to_minimum(
+                            seg_resp.content, segment_data
+                        )
+                    final_segment_url = str(seg_resp.url)
+                    content_type = self._get_header(seg_resp.headers, 'Content-Type')
+                    if self._is_hls_playlist_payload(segment_data):
+                        child_data = await self._read_limited_content(
+                            seg_resp.content, 64 * 1024, segment_data
+                        )
+                        alive, msg = await self._check_hls_playlist(
+                            session, channel, final_segment_url, child_data,
+                            seg_resp.headers, depth + 1, visited.copy()
+                        )
+                        if alive:
+                            return True, msg
+                        errors.append(msg)
+                        continue
+
+                    valid, evidence, reason = self._classify_media_payload(
+                        segment_data, content_type, hls_segment=True
+                    )
+                    if valid:
+                        channel['probe_url'] = final_segment_url
+                        channel['_probe_referer'] = playlist_url
+                        channel['_hls_media_playlist_url'] = playlist_url
+                        channel['_liveness_evidence'] = evidence
+                        return True, "存活 (M3U8/切片内容已验证)"
+                    errors.append(f"切片{reason}")
+            except asyncio.TimeoutError:
+                errors.append("切片超时")
+            except Exception as e:
+                errors.append(f"切片异常:{type(e).__name__}")
+
+        if not variants and not media_candidates:
+            return False, "M3U8 未找到可探测媒体"
+        error_summary = "; ".join(errors[-3:]) if errors else "无可用切片"
+        return False, f"切片无法播放 ({error_summary})"
+
+    async def _refresh_hls_probe_url(self, session, channel):
+        playlist_url = channel.get('_hls_media_playlist_url')
+        if not playlist_url:
+            return None
+        request_timeout = aiohttp.ClientTimeout(
+            total=max(2.0, float(self.timeout)),
+            connect=max(1.0, float(self.timeout)),
+        )
+        try:
+            async with session.get(
+                playlist_url, headers=self.headers, timeout=request_timeout,
+                ssl=False, allow_redirects=True
+            ) as response:
+                if response.status not in [200, 206]:
+                    return None
+                first_chunk = await response.content.read(4096)
+                if not self._is_hls_playlist_payload(first_chunk):
+                    return None
+                playlist_data = await self._read_limited_content(
+                    response.content, 64 * 1024, first_chunk
+                )
+                playlist_text = playlist_data.decode('utf-8-sig', errors='ignore')
+                _, segments, parts = self._parse_hls_playlist(playlist_text)
+                candidates = segments + parts
+                if not candidates:
+                    return None
+                refreshed_url = urljoin(str(response.url), candidates[-1])
+                channel['probe_url'] = refreshed_url
+                channel['_probe_referer'] = str(response.url)
+                return refreshed_url
+        except Exception as e:
+            logger.debug(f"刷新 HLS 切片失败 [{channel.get('name')}]: {type(e).__name__}: {e}")
+            return None
+
+    def _decode_chunked_body(self, body):
+        decoded = []
+        position = 0
+        try:
+            while position < len(body):
+                line_end = body.find(b'\r\n', position)
+                if line_end < 0:
+                    break
+                size_text = body[position:line_end].split(b';', 1)[0].strip()
+                chunk_size = int(size_text, 16)
+                position = line_end + 2
+                if chunk_size == 0:
+                    return b''.join(decoded)
+                available = min(chunk_size, len(body) - position)
+                decoded.append(body[position:position + available])
+                position += available
+                if available < chunk_size:
+                    break
+                if body[position:position + 2] == b'\r\n':
+                    position += 2
+        except (TypeError, ValueError):
+            return body
+        return b''.join(decoded) if decoded else body
+
+    async def _check_hls_playlist_via_socket(
+        self, channel, playlist_url, playlist_data, playlist_headers=None,
+        depth=0, visited=None
+    ):
+        if depth > 3:
+            return False, "socket M3U8 层级过深"
+        visited = visited or set()
+        if playlist_url in visited:
+            return False, "socket M3U8 出现循环引用"
+        visited.add(playlist_url)
+
+        if not self._is_hls_playlist_payload(playlist_data):
+            return False, "socket 响应不是有效 M3U8"
+        playlist_text = playlist_data.decode('utf-8-sig', errors='ignore')
+        if self._is_stale_live_playlist(playlist_text, playlist_headers):
+            channel['_playlist_stale_hint'] = True
+            logger.debug(f"socket M3U8 响应头疑似停更，继续验证实际切片: {playlist_url}")
+        variants, segments, parts = self._parse_hls_playlist(playlist_text)
+        if not variants:
+            self._update_text_resolution(channel, playlist_text)
+        errors = []
+
+        for _, variant_height, variant_uri in self._select_hls_variants(variants):
+            if variant_height:
+                self._set_text_resolution(channel, variant_height)
+            target_url = urljoin(playlist_url, variant_uri)
+            result = await self._fetch_via_socket(target_url)
+            if not result.get('ok'):
+                errors.append(result.get('error', 'socket 子列表失败'))
+                continue
+            status_code = result.get('status_code')
+            if status_code is not None and status_code not in [200, 206]:
+                errors.append(f"socket 子列表HTTP {status_code}")
+                continue
+            body = result.get('body', b'')
+            final_url = result.get('url', target_url)
+            headers = result.get('headers', {})
+            if self._is_hls_playlist_payload(body):
+                alive, msg = await self._check_hls_playlist_via_socket(
+                    channel, final_url, body, headers, depth + 1, visited.copy()
+                )
+                if alive:
+                    return True, msg
+                errors.append(msg)
+                continue
+            valid, evidence, reason = self._classify_media_payload(
+                body, self._get_header(headers, 'Content-Type'), hls_segment=True
+            )
+            if valid:
+                channel['probe_url'] = final_url
+                channel['_probe_referer'] = playlist_url
+                channel['_liveness_evidence'] = evidence
+                return True, "存活 (M3U8/socket媒体变体)"
+            errors.append(reason)
+
+        media_candidates = list(reversed(segments[-3:]))
+        media_candidates.extend(reversed(parts[-3:]))
+        for media_uri in media_candidates:
+            target_url = urljoin(playlist_url, media_uri)
+            result = await self._fetch_via_socket(target_url)
+            if not result.get('ok'):
+                errors.append(result.get('error', 'socket 切片失败'))
+                continue
+            status_code = result.get('status_code')
+            if status_code is not None and status_code not in [200, 206]:
+                errors.append(f"socket 切片HTTP {status_code}")
+                continue
+            body = result.get('body', b'')
+            headers = result.get('headers', {})
+            valid, evidence, reason = self._classify_media_payload(
+                body, self._get_header(headers, 'Content-Type'), hls_segment=True
+            )
+            if valid:
+                channel['probe_url'] = result.get('url', target_url)
+                channel['_probe_referer'] = playlist_url
+                channel['_hls_media_playlist_url'] = playlist_url
+                channel['_liveness_evidence'] = evidence
+                return True, "存活 (M3U8/socket切片内容已验证)"
+            errors.append(f"socket 切片{reason}")
+
+        if not variants and not media_candidates:
+            return False, "socket M3U8 未找到可探测媒体"
+        error_summary = "; ".join(errors[-3:]) if errors else "无可用切片"
+        return False, f"socket 切片无法播放 ({error_summary})"
 
     def _parse_http_header_block(self, header_blob):
         status_code = None
@@ -139,7 +665,7 @@ class IPTVCheckerFinal:
                 timeout=read_timeout
             )
             writer.write(request_bytes)
-            await writer.drain()
+            await asyncio.wait_for(writer.drain(), timeout=read_timeout)
 
             chunks = []
             total_bytes = 0
@@ -156,7 +682,9 @@ class IPTVCheckerFinal:
             if writer is not None:
                 writer.close()
                 try:
-                    await writer.wait_closed()
+                    await asyncio.wait_for(
+                        writer.wait_closed(), timeout=max(1.0, min(2.0, read_timeout))
+                    )
                 except Exception:
                     pass
 
@@ -193,6 +721,9 @@ class IPTVCheckerFinal:
                 status_code, headers = None, {}
                 body = raw
 
+            if 'chunked' in headers.get('transfer-encoding', '').lower():
+                body = self._decode_chunked_body(body)
+
             if status_code in [301, 302, 303, 307, 308]:
                 location = headers.get('location')
                 if not location:
@@ -217,10 +748,11 @@ class IPTVCheckerFinal:
         某些 HTTP 裸流服务端返回并不完全符合 aiohttp 的解析预期，
         但播放器仍可正常消费。这里只对这类 URL 做一次异步 socket 回退，
         避免整批误杀。
+        同时接住会被 aiohttp 严格解析拒绝、但播放器仍能读取的 HTTP/HTTPS HLS。
         """
         url = channel.get('url', '')
         parsed = urlparse(url)
-        if parsed.scheme != 'http' or self._is_playlist_like_url(url):
+        if parsed.scheme not in ('http', 'https'):
             return False, "不适用 socket 回退"
 
         host = parsed.hostname
@@ -241,32 +773,72 @@ class IPTVCheckerFinal:
             if status_code is not None and status_code not in [200, 206]:
                 return False, f"socket HTTP异常: {status_code}{redirect_suffix}"
 
-            if b'#EXTM3U' in body:
-                text_str = body.decode('utf-8', errors='ignore')
-                res_match = re.search(r'RESOLUTION=(\d+)x(\d+)', text_str)
-                if res_match:
-                    h = int(res_match.group(2))
-                    if h >= 2160: channel['text_res'] = "4K"
-                    elif h >= 1080: channel['text_res'] = "1080P"
-                    elif h >= 720: channel['text_res'] = "720P"
-                    else: channel['text_res'] = "标清"
+            if self._is_hls_playlist_payload(body):
+                alive, msg = await self._check_hls_playlist_via_socket(
+                    channel, final_url, body, socket_result.get('headers', {})
+                )
+                if alive:
+                    return True, f"{msg}{redirect_suffix}"
+                return False, msg
 
-                first_link = next((line.strip() for line in text_str.split('\n') if line.strip() and not line.startswith('#')), None)
-                channel['probe_url'] = urljoin(final_url, first_link) if first_link else final_url
-                return True, f"存活 (M3U8/socket回退{redirect_suffix})"
-
-            if self._is_html_payload(body):
+            if self._is_html_payload(body) and not self._looks_like_media_payload(body):
                 return False, "socket 命中防盗链网页"
 
-            if len(body) > 100 or self._looks_like_ts_payload(body):
+            content_type = self._get_header(socket_result.get('headers', {}), 'Content-Type')
+            valid, evidence, reason = self._classify_media_payload(body, content_type)
+            if valid and (len(body) > 100 or self._looks_like_ts_payload(body)):
                 channel['probe_url'] = final_url
+                channel['_liveness_evidence'] = evidence
                 return True, f"存活 (裸流/socket回退{redirect_suffix})"
 
-            return False, f"socket 数据异常过小: {len(body)} bytes"
+            return False, f"socket {reason}"
         except asyncio.TimeoutError:
             return False, "socket 超时"
         except Exception as e:
             return False, f"socket 异常: {type(e).__name__}:{e}"
+
+    def _parse_cached_time(self, cached_time):
+        if isinstance(cached_time, str):
+            try:
+                dt = datetime.strptime(cached_time, '%Y-%m-%d %H:%M:%S')
+                dt = dt.replace(tzinfo=timezone(timedelta(hours=8)))
+                return int(dt.timestamp())
+            except (TypeError, ValueError, OverflowError):
+                return 0
+        try:
+            return int(cached_time or 0)
+        except (TypeError, ValueError, OverflowError):
+            return 0
+
+    def _utc8_timestamp(self):
+        tz_utc_8 = timezone(timedelta(hours=8))
+        return datetime.now(tz_utc_8).strftime('%Y-%m-%d %H:%M:%S')
+
+    def _apply_cached_probe_info(self, channel, current_time):
+        original_url = channel['url']
+        cached = self.cache_data.get(original_url)
+        if not isinstance(cached, dict):
+            return False
+
+        # --- 新增：兼容解析旧版数字时间戳和新版UTC+8时间字符串 ---
+        cached_time = cached.get("last_probed", 0)
+        cached_time_int = self._parse_cached_time(cached_time)
+        # -----------------------------------------------------------
+
+        res = cached.get('resolution', '')
+        codec = cached.get('codec', '')
+        if res == "Unknown" and codec == "Unknown":
+            self.cache_data.pop(original_url, None)
+            logger.warning(f"[♻ 负缓存失效] [{channel.get('name')}] 旧版 Unknown 只代表画质探测失败，本次重新探测。")
+            return False
+        if current_time - cached_time_int >= self.cache_expire_sec:
+            return False
+        if not res or not codec:
+            return False
+
+        channel['probe_info'] = f"[{res}][{codec}]"
+        logger.info(f"[⚡ 缓存命中] [{channel.get('name')}] -> {channel['probe_info']}")
+        return True
 
     # ================= 纯内存处理核心 API =================
     async def process_channel_list(self, channels):
@@ -304,76 +876,87 @@ class IPTVCheckerFinal:
         if self.enable_probe and alive_target_channels:
             logger.info(f"\n[Step 2] 启动终极质量探测引擎！存活频道数: {len(alive_target_channels)}")
             current_time = int(time.time())
-            probe_sem = asyncio.Semaphore(4) 
-            
-            async def probe_worker(channel):
-                original_url = channel['url']
-                
-                if original_url in self.cache_data:
-                    cached = self.cache_data[original_url]
-                    
-                    # --- 新增：兼容解析旧版数字时间戳和新版UTC+8时间字符串 ---
-                    cached_time = cached.get("last_probed", 0)
-                    if isinstance(cached_time, str):
-                        try:
-                            dt = datetime.strptime(cached_time, '%Y-%m-%d %H:%M:%S')
-                            dt = dt.replace(tzinfo=timezone(timedelta(hours=8)))
-                            cached_time_int = int(dt.timestamp())
-                        except ValueError:
-                            cached_time_int = 0
-                    else:
-                        cached_time_int = cached_time
-                    # -----------------------------------------------------------
-                    
-                    if current_time - cached_time_int < self.cache_expire_sec:
-                        res, codec = cached.get('resolution', ''), cached.get('codec', '')
-                        if res == "Unknown" and codec == "Unknown":
-                            channel['is_alive'] = False
-                            channel['msg'] = "深度探测无视频流数据 (缓存)"
-                            failed_channels.append(channel)
-                            logger.warning(f"[💥 缓存剔除] [{channel.get('name')}] 此源已被记录为死流，彻底移除。")
-                            return
-                        if res and codec:
-                            channel['probe_info'] = f"[{res}][{codec}]"
-                            logger.info(f"[⚡ 缓存命中] [{channel.get('name')}] -> {channel['probe_info']}")
-                        return
+            channels_to_probe = [
+                channel for channel in alive_target_channels
+                if not self._apply_cached_probe_info(channel, current_time)
+            ]
 
-                async with probe_sem:
-                    logger.info(f"[🔍 深度探测中] [{channel.get('name')}]...")
-                    target_to_probe = channel.get('probe_url', original_url)
-                    info = await self.probe_video_info(target_to_probe)
-                    
-                    if not info and target_to_probe != original_url:
-                        logger.debug(f"[🔄 自动重试] [{channel.get('name')}] 切片探测失败，回退解析原 M3U8...")
-                        info = await self.probe_video_info(original_url)
-                    
-                    if info and info['resolution'] != "未知":
-                        channel['probe_info'] = f"[{info['resolution']}][{info['codec']}]"
-                        self.cache_data[original_url] = info
-                        logger.info(f"[🎯 探测成功] [{channel.get('name')}] -> {channel['probe_info']}")
-                    else:
-                        # --- 新增：生成当前 UTC+8 时间格式字符串 ---
-                        tz_utc_8 = timezone(timedelta(hours=8))
-                        fmt_time = datetime.now(tz_utc_8).strftime('%Y-%m-%d %H:%M:%S')
-                        # ----------------------------------------
-                        
-                        text_res = channel.get('text_res', '')
-                        if text_res:
-                            channel['probe_info'] = f"[{text_res}][M3U8]"
-                            self.cache_data[original_url] = {"resolution": text_res, "codec": "M3U8", "last_probed": fmt_time}
-                            logger.info(f"[📝 文本保底成功] [{channel.get('name')}] -> {channel['probe_info']}")
-                        else:
-                            self.cache_data[original_url] = {"resolution": "Unknown", "codec": "Unknown", "last_probed": fmt_time}
-                            channel['is_alive'] = False
-                            channel['msg'] = "深度探测彻底失败，无视频流"
-                            failed_channels.append(channel)
-                            logger.warning(f"[💥 终极剔除] [{channel.get('name')}] 假活源/无画质参数，抹除！")
-
-            probe_tasks = [probe_worker(ch) for ch in alive_target_channels]
-            if probe_tasks:
-                await asyncio.gather(*probe_tasks)
+            if not channels_to_probe:
                 self.save_cache()
-                logger.info("[Step 2] 质量探测完成，缓存已更新！\n")
+                logger.info("[Step 2] 全部命中有效画质缓存，无需启动 ffprobe。\n")
+            elif not self.ffprobe_path:
+                logger.warning("[⚠ 深度探测跳过] 系统 PATH 中未找到 ffprobe；保留 Step 1 已确认存活的频道。")
+                self.save_cache()
+            else:
+                probe_sem = asyncio.Semaphore(4)
+                probe_connector = aiohttp.TCPConnector(ssl=False)
+
+                async with aiohttp.ClientSession(connector=probe_connector) as probe_session:
+                    async def probe_worker(channel):
+                        original_url = channel['url']
+
+                        async with probe_sem:
+                            logger.info(f"[🔍 深度探测中] [{channel.get('name')}]...")
+                            refreshed_url = await self._refresh_hls_probe_url(probe_session, channel)
+                            target_to_probe = refreshed_url or channel.get('probe_url', original_url)
+                            referer = channel.get('_probe_referer')
+                            info, probe_status, probe_detail = await self.probe_video_info(
+                                target_to_probe, referer=referer, return_status=True,
+                                direct_segment=target_to_probe != original_url
+                            )
+
+                            if (
+                                (not info or info.get('resolution') == "未知")
+                                and target_to_probe != original_url
+                            ):
+                                logger.debug(f"[🔄 自动重试] [{channel.get('name')}] 切片探测失败，回退解析原 M3U8...")
+                                info, probe_status, probe_detail = await self.probe_video_info(
+                                    original_url, referer=original_url, return_status=True,
+                                    direct_segment=False
+                                )
+
+                            if info and info['resolution'] != "未知":
+                                channel['probe_info'] = f"[{info['resolution']}][{info['codec']}]"
+                                self.cache_data[original_url] = info
+                                logger.info(f"[🎯 探测成功] [{channel.get('name')}] -> {channel['probe_info']}")
+                            else:
+                                # --- 新增：生成当前 UTC+8 时间格式字符串 ---
+                                fmt_time = self._utc8_timestamp()
+                                # ----------------------------------------
+
+                                text_res = channel.get('text_res', '')
+                                evidence = channel.get('_liveness_evidence', 'weak')
+                                text_fallback_allowed = (
+                                    probe_status != 'no_video'
+                                    and not (evidence == 'weak' and probe_status == 'error')
+                                )
+                                if text_res and text_fallback_allowed:
+                                    fallback_codec = info.get('codec', 'M3U8') if info else 'M3U8'
+                                    channel['probe_info'] = f"[{text_res}][{fallback_codec}]"
+                                    self.cache_data[original_url] = {"resolution": text_res, "codec": fallback_codec, "last_probed": fmt_time}
+                                    logger.info(f"[📝 文本保底成功] [{channel.get('name')}] -> {channel['probe_info']}")
+                                else:
+                                    should_remove = (
+                                        probe_status == 'no_video'
+                                        or (evidence == 'weak' and probe_status == 'error')
+                                    )
+                                    if should_remove:
+                                        channel['is_alive'] = False
+                                        channel['msg'] = "深度探测确认无可播放视频流"
+                                        failed_channels.append(channel)
+                                        logger.warning(f"[💥 终极剔除] [{channel.get('name')}] 假活源/无画质参数，抹除！")
+                                    else:
+                                        channel['probe_warning'] = probe_detail or probe_status
+                                        logger.warning(
+                                            f"[⚠ 深探不确定] [{channel.get('name')}] "
+                                            f"极速测活已有媒体证据，ffprobe={probe_status}，保留频道并等待下次重试。"
+                                        )
+
+                    probe_tasks = [probe_worker(ch) for ch in channels_to_probe]
+                    if probe_tasks:
+                        await asyncio.gather(*probe_tasks)
+                        self.save_cache()
+                        logger.info("[Step 2] 质量探测完成，缓存已更新！\n")
 
         self.write_failed_log(failed_channels)
         return channels # 返回更新了状态的整个列表
@@ -383,45 +966,39 @@ class IPTVCheckerFinal:
         url = channel['url']
         async with sem:
             try:
-                client_timeout = aiohttp.ClientTimeout(total=self.timeout, connect=self.timeout / 2)
+                client_timeout = aiohttp.ClientTimeout(total=self.timeout, connect=self.timeout)
                 async with session.get(url, headers=self.headers, timeout=client_timeout, ssl=False, allow_redirects=True) as response:
                     if response.status not in [200, 206]: return False, channel, f"HTTP异常: {response.status}"
 
                     chunk = await response.content.read(4096)
                     if not chunk: return False, channel, "未返回数据"
+                    if len(chunk) <= 100:
+                        chunk = await self._read_to_minimum(response.content, chunk)
 
                     final_url = str(response.url)
+                    content_type = self._get_header(response.headers, 'Content-Type')
 
-                    if b'#EXTM3U' in chunk:
-                        text_str = chunk.decode('utf-8', errors='ignore')
-                        res_match = re.search(r'RESOLUTION=(\d+)x(\d+)', text_str)
-                        if res_match:
-                            h = int(res_match.group(2))
-                            if h >= 2160: channel['text_res'] = "4K"
-                            elif h >= 1080: channel['text_res'] = "1080P"
-                            elif h >= 720: channel['text_res'] = "720P"
-                            else: channel['text_res'] = "标清"
+                    if self._is_hls_playlist_payload(chunk):
+                        playlist_data = await self._read_limited_content(
+                            response.content, 64 * 1024, chunk
+                        )
+                        alive, msg = await self._check_hls_playlist(
+                            session, channel, final_url, playlist_data, response.headers
+                        )
+                        return alive, channel, msg
 
-                        first_link = next((line.strip() for line in text_str.split('\n') if line.strip() and not line.startswith('#')), None)
-                        if first_link:
-                            target_url = urljoin(final_url, first_link)
-                            try:
-                                seg_timeout = aiohttp.ClientTimeout(total=self.timeout / 2)
-                                async with session.get(target_url, headers=self.headers, timeout=seg_timeout, ssl=False) as seg_resp:
-                                    if seg_resp.status in [200, 206]:
-                                        channel['probe_url'] = target_url
-                                        return True, channel, "存活 (M3U8)"
-                                    else: return False, channel, f"死切片"
-                            except Exception: return False, channel, "切片无法连通"
-                        else: return False, channel, "提取切片失败"
-
-                    if b'<html' in chunk.lower() and b'<body' in chunk.lower(): return False, channel, "防盗链网页"
-                    if len(chunk) > 100:
+                    if self._is_html_payload(chunk) and not self._looks_like_media_payload(chunk): return False, channel, "防盗链网页"
+                    valid, evidence, reason = self._classify_media_payload(chunk, content_type)
+                    if valid and len(chunk) > 100:
                         channel['probe_url'] = final_url
+                        channel['_liveness_evidence'] = evidence
                         return True, channel, f"存活 (裸流)"
-                    else: return False, channel, "数据异常过小"
+                    else: return False, channel, reason
 
             except asyncio.TimeoutError:
+                socket_alive, socket_msg = await self._socket_http_probe(channel)
+                if socket_alive:
+                    return True, channel, socket_msg
                 return False, channel, "请求/读取超时"
             except Exception as e:
                 socket_alive, socket_msg = await self._socket_http_probe(channel)
@@ -429,41 +1006,110 @@ class IPTVCheckerFinal:
                     return True, channel, socket_msg
                 return False, channel, f"网络异常({type(e).__name__}: {e}; {socket_msg})"
 
-    async def probe_video_info(self, probe_url):
+    async def _terminate_probe_process(self, process):
+        if process is None or process.returncode is not None:
+            return
+        try:
+            process.kill()
+        except (ProcessLookupError, OSError):
+            pass
+        try:
+            await asyncio.wait_for(process.wait(), timeout=2.0)
+        except Exception:
+            pass
+
+    async def probe_video_info(
+        self, probe_url, referer=None, return_status=False, direct_segment=False
+    ):
+        if not self.ffprobe_path:
+            result = (None, 'unavailable', '系统 PATH 中未找到 ffprobe')
+            return result if return_status else None
+
         cmd = [
-            'ffprobe', '-v', 'quiet', '-print_format', 'json',
+            self.ffprobe_path, '-v', 'error', '-print_format', 'json',
             '-show_streams', '-select_streams', 'v:0',
             '-probesize', '8000000', '-analyzeduration', '10000000',
             '-user_agent', self.headers["User-Agent"],
-            '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '2',
-            probe_url
+            '-rw_timeout', '8000000' if direct_segment else '12000000',
         ]
+        if not direct_segment:
+            cmd.extend([
+                '-reconnect', '1', '-reconnect_streamed', '1',
+                '-reconnect_delay_max', '2',
+            ])
+        if referer and urlparse(probe_url).scheme in ('http', 'https'):
+            cmd.extend(['-referer', referer])
+        cmd.append(probe_url)
+
+        process = None
+        active_probe_timeout = min(6.0, self.probe_timeout) if direct_segment else self.probe_timeout
         try:
             process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15.0)
-            if not stdout: return None
-                
-            data = json.loads(stdout.decode('utf-8'))
-            if 'streams' in data and len(data['streams']) > 0:
-                stream = data['streams'][0]
-                width = stream.get('width', 0)
-                height = stream.get('height', 0)
-                codec = stream.get('codec_name', 'unknown').upper()
-                
-                res_name = f"{width}x{height}"
-                if height >= 2160: res_name = "4K"
-                elif height >= 1080: res_name = "1080P"
-                elif height >= 720: res_name = "720P"
-                elif height > 0: res_name = "标清"
-                else: res_name = "未知"
-                
-                # --- 新增：返回 UTC+8 格式化字符串 ---
-                tz_utc_8 = timezone(timedelta(hours=8))
-                fmt_time = datetime.now(tz_utc_8).strftime('%Y-%m-%d %H:%M:%S')
-                return {"resolution": res_name, "codec": codec, "last_probed": fmt_time}
-                # ------------------------------------
-        except Exception: return None
-        return None
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=active_probe_timeout
+            )
+            stderr_text = stderr.decode('utf-8', errors='replace').strip()[-500:]
+            if process.returncode not in (0, None):
+                result = (None, 'error', stderr_text or f"ffprobe退出码 {process.returncode}")
+                return result if return_status else None
+            if not stdout:
+                result = (None, 'error', stderr_text or "ffprobe未返回JSON")
+                return result if return_status else None
+
+            try:
+                data = json.loads(stdout.decode('utf-8'))
+            except (UnicodeDecodeError, json.JSONDecodeError) as e:
+                result = (None, 'error', f"ffprobe JSON解析失败: {e}")
+                return result if return_status else None
+
+            streams = data.get('streams', [])
+            if not streams:
+                result = (None, 'no_video', stderr_text or "ffprobe确认未发现视频轨")
+                return result if return_status else None
+
+            stream = streams[0]
+            try:
+                width = int(stream.get('width', 0) or 0)
+                height = int(stream.get('height', 0) or 0)
+            except (TypeError, ValueError):
+                width, height = 0, 0
+            codec = str(stream.get('codec_name', 'unknown') or 'unknown').upper()
+
+            res_name = f"{width}x{height}"
+            if height >= 2160: res_name = "4K"
+            elif height >= 1080: res_name = "1080P"
+            elif height >= 720: res_name = "720P"
+            elif height > 0: res_name = "标清"
+            else: res_name = "未知"
+
+            # --- 新增：返回 UTC+8 格式化字符串 ---
+            fmt_time = self._utc8_timestamp()
+            info = {"resolution": res_name, "codec": codec, "last_probed": fmt_time}
+            # ------------------------------------
+            status = 'success' if res_name != "未知" else 'video_unknown'
+            result = (info, status, stderr_text)
+            return result if return_status else info
+        except asyncio.CancelledError:
+            await self._terminate_probe_process(process)
+            raise
+        except asyncio.TimeoutError:
+            await self._terminate_probe_process(process)
+            result = (None, 'timeout', f"ffprobe超过 {active_probe_timeout:.1f}s 已终止")
+            return result if return_status else None
+        except FileNotFoundError:
+            result = (None, 'unavailable', '系统 PATH 中未找到 ffprobe')
+            return result if return_status else None
+        except NotImplementedError:
+            result = (
+                None,
+                'unavailable',
+                '当前 Windows asyncio 事件循环不支持子进程，请使用 Proactor',
+            )
+            return result if return_status else None
+        except Exception as e:
+            logger.debug(f"ffprobe异常 [{probe_url}]: {type(e).__name__}: {e}")
+            result = (None, 'error', f"{type(e).__name__}: {e}")
+            return result if return_status else None
 
     # ================= 规范化的日志输出 =================
     def write_failed_log(self, failed_channels):
@@ -574,7 +1220,12 @@ def main():
     args = parser.parse_args()
     
     start_time = time.time()
-    if sys.platform == 'win32': asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    if sys.platform == 'win32':
+        event_loop_policy = (
+            asyncio.WindowsProactorEventLoopPolicy()
+            if args.enable_probe else asyncio.WindowsSelectorEventLoopPolicy()
+        )
+        asyncio.set_event_loop_policy(event_loop_policy)
     asyncio.run(cli_main(args))
     logger.info(f"任务结束！总耗时: {time.time() - start_time:.2f} 秒")
 
