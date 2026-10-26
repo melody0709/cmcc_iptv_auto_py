@@ -39,7 +39,11 @@ if not logger.handlers:
 # ======================================================
 
 class IPTVCheckerFinal:
-    def __init__(self, target_group=None, timeout=10, workers=30, enable_probe=False, cache_expire_hours=24):
+    def __init__(
+        self, target_group=None, timeout=10, workers=30, enable_probe=False,
+        cache_expire_hours=48, min_speed_kbs=0.0, speed_sample_kb=125, speed_sample_duration=2.0,
+        segment_probesize=500000
+    ):
         # 作为库被调用时，不再强依赖输入/输出文件路径
         self.target_group = target_group
         self.timeout = timeout
@@ -49,6 +53,10 @@ class IPTVCheckerFinal:
         self.cache_expire_sec = cache_expire_hours * 3600
         self.probe_timeout = 15.0
         self.ffprobe_path = shutil.which('ffprobe') if enable_probe else None
+        self.min_speed_kbs = float(min_speed_kbs or 0.0)
+        self.speed_sample_kb = int(speed_sample_kb or 125)
+        self.speed_sample_duration = float(speed_sample_duration or 2.0)
+        self.segment_probesize = str(segment_probesize or 500000)
         
         # 缓存文件优先放在 config 目录，没有则放当前目录
         project_config_dir = os.path.join(os.path.dirname(BASE_DIR), "config")
@@ -341,6 +349,25 @@ class IPTVCheckerFinal:
             total_bytes += len(chunk)
         return b''.join(chunks)
 
+    async def _measure_stream_speed(self, content, initial_data, timeout_sec=2.0, limit_bytes=125*1024):
+        t0 = time.monotonic()
+        total_bytes = len(initial_data)
+        while total_bytes < limit_bytes and not content.at_eof():
+            remain = timeout_sec - (time.monotonic() - t0)
+            if remain <= 0:
+                break
+            try:
+                chunk = await asyncio.wait_for(content.read(min(32768, limit_bytes - total_bytes)), timeout=max(0.1, remain))
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+            except (asyncio.TimeoutError, Exception):
+                break
+        elapsed = max(0.001, time.monotonic() - t0)
+        speed_kbs = (total_bytes / 1024.0) / elapsed
+        return speed_kbs, total_bytes, elapsed
+
+
     async def _check_hls_playlist(
         self, session, channel, playlist_url, playlist_data, playlist_headers=None,
         depth=0, visited=None
@@ -413,10 +440,22 @@ class IPTVCheckerFinal:
                         first_chunk, content_type, hls_segment=True
                     )
                     if valid:
+                        if self.min_speed_kbs > 0:
+                            speed_kbs, _, _ = await self._measure_stream_speed(
+                                variant_resp.content, first_chunk,
+                                timeout_sec=self.speed_sample_duration,
+                                limit_bytes=self.speed_sample_kb * 1024
+                            )
+                            if speed_kbs < self.min_speed_kbs:
+                                errors.append(f"变体流速过低: {speed_kbs:.1f} KB/s < {self.min_speed_kbs:.1f} KB/s")
+                                continue
+                            channel['speed_kbs'] = speed_kbs
+
                         channel['probe_url'] = final_variant_url
                         channel['_probe_referer'] = playlist_url
                         channel['_liveness_evidence'] = evidence
-                        return True, "存活 (M3U8媒体变体)"
+                        speed_msg = f"/流速 {channel['speed_kbs']:.1f} KB/s" if channel.get('speed_kbs') else ""
+                        return True, f"存活 (M3U8媒体变体{speed_msg})"
                     errors.append(reason)
             except asyncio.TimeoutError:
                 errors.append("子列表超时")
@@ -465,11 +504,23 @@ class IPTVCheckerFinal:
                         segment_data, content_type, hls_segment=True
                     )
                     if valid:
+                        if self.min_speed_kbs > 0:
+                            speed_kbs, _, _ = await self._measure_stream_speed(
+                                seg_resp.content, segment_data,
+                                timeout_sec=self.speed_sample_duration,
+                                limit_bytes=self.speed_sample_kb * 1024
+                            )
+                            if speed_kbs < self.min_speed_kbs:
+                                errors.append(f"切片流速过低: {speed_kbs:.1f} KB/s < {self.min_speed_kbs:.1f} KB/s")
+                                continue
+                            channel['speed_kbs'] = speed_kbs
+
                         channel['probe_url'] = final_segment_url
                         channel['_probe_referer'] = playlist_url
                         channel['_hls_media_playlist_url'] = playlist_url
                         channel['_liveness_evidence'] = evidence
-                        return True, "存活 (M3U8/切片内容已验证)"
+                        speed_msg = f"/流速 {channel['speed_kbs']:.1f} KB/s" if channel.get('speed_kbs') else ""
+                        return True, f"存活 (M3U8/切片内容已验证{speed_msg})"
                     errors.append(f"切片{reason}")
             except asyncio.TimeoutError:
                 errors.append("切片超时")
@@ -871,6 +922,7 @@ class IPTVCheckerFinal:
                     else:
                         logger.warning(f"[x 失效] [{channel.get('name', '未知')}] - {msg}")
                         failed_channels.append(channel)
+                        self.cache_data.pop(channel.get('url', ''), None)
 
         # --- Step 2: 终极质量探测 ---
         if self.enable_probe and alive_target_channels:
@@ -944,6 +996,7 @@ class IPTVCheckerFinal:
                                         channel['is_alive'] = False
                                         channel['msg'] = "深度探测确认无可播放视频流"
                                         failed_channels.append(channel)
+                                        self.cache_data.pop(channel.get('url', ''), None)
                                         logger.warning(f"[💥 终极剔除] [{channel.get('name')}] 假活源/无画质参数，抹除！")
                                     else:
                                         channel['probe_warning'] = probe_detail or probe_status
@@ -990,9 +1043,20 @@ class IPTVCheckerFinal:
                     if self._is_html_payload(chunk) and not self._looks_like_media_payload(chunk): return False, channel, "防盗链网页"
                     valid, evidence, reason = self._classify_media_payload(chunk, content_type)
                     if valid and len(chunk) > 100:
+                        if self.min_speed_kbs > 0:
+                            speed_kbs, _, _ = await self._measure_stream_speed(
+                                response.content, chunk,
+                                timeout_sec=self.speed_sample_duration,
+                                limit_bytes=self.speed_sample_kb * 1024
+                            )
+                            if speed_kbs < self.min_speed_kbs:
+                                return False, channel, f"流速过低: {speed_kbs:.1f} KB/s < {self.min_speed_kbs:.1f} KB/s (裸流限速)"
+                            channel['speed_kbs'] = speed_kbs
+
                         channel['probe_url'] = final_url
                         channel['_liveness_evidence'] = evidence
-                        return True, channel, f"存活 (裸流)"
+                        speed_msg = f"/流速 {channel['speed_kbs']:.1f} KB/s" if channel.get('speed_kbs') else ""
+                        return True, channel, f"存活 (裸流{speed_msg})"
                     else: return False, channel, reason
 
             except asyncio.TimeoutError:
@@ -1028,7 +1092,8 @@ class IPTVCheckerFinal:
         cmd = [
             self.ffprobe_path, '-v', 'error', '-print_format', 'json',
             '-show_streams', '-select_streams', 'v:0',
-            '-probesize', '8000000', '-analyzeduration', '10000000',
+            '-probesize', self.segment_probesize if direct_segment else '8000000',
+            '-analyzeduration', '3000000' if direct_segment else '10000000',
             '-user_agent', self.headers["User-Agent"],
             '-rw_timeout', '8000000' if direct_segment else '12000000',
         ]
@@ -1198,7 +1263,9 @@ class IPTVCheckerFinal:
 async def cli_main(args):
     checker = IPTVCheckerFinal(
         target_group=args.group, timeout=args.timeout, workers=args.workers, 
-        enable_probe=args.enable_probe, cache_expire_hours=args.cache_expire
+        enable_probe=args.enable_probe, cache_expire_hours=args.cache_expire,
+        min_speed_kbs=args.min_speed, speed_sample_kb=args.speed_sample_kb,
+        speed_sample_duration=args.speed_duration
     )
     channels = checker.parse_m3u_file(args.input)
     if channels:
@@ -1216,7 +1283,10 @@ def main():
     parser.add_argument("-t", "--timeout", type=int, default=10)
     parser.add_argument("-w", "--workers", type=int, default=30)
     parser.add_argument("--enable-probe", action="store_true")
-    parser.add_argument("--cache-expire", type=int, default=24)
+    parser.add_argument("--cache-expire", type=int, default=48)
+    parser.add_argument("--min-speed", type=float, default=0.0, help="最低流速门限(KB/s)，低于此阈值判定为限速死流")
+    parser.add_argument("--speed-sample-kb", type=int, default=125, help="测速采样上限(KB)")
+    parser.add_argument("--speed-duration", type=float, default=2.0, help="测速采样时间上限(秒)")
     args = parser.parse_args()
     
     start_time = time.time()

@@ -526,5 +526,38 @@ class IPTVCheckerRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Proactor", detail)
 
 
+    async def test_speed_gate_rejects_throttled_slice(self):
+        async def slow_seg(request):
+            response = web.StreamResponse(status=200, headers={"Content-Type": "video/mp2t"})
+            await response.prepare(request)
+            await response.write(make_ts_payload(22))
+            await asyncio.sleep(0.3)
+            await response.write_eof()
+            return response
+
+        self.responders["/live.m3u8"] = lambda req: web.Response(
+            text="#EXTM3U\n#EXTINF:6.0,\n/seg.ts\n", content_type="application/vnd.apple.mpegurl"
+        )
+        self.responders["/seg.ts"] = slow_seg
+
+        checker = NoDiskChecker(timeout=2, workers=1, min_speed_kbs=80.0, speed_sample_duration=0.5)
+        alive, channel, msg = await self.check_once(checker, "/live.m3u8")
+        self.assertFalse(alive)
+        self.assertIn("流速过低", msg)
+
+    async def test_speed_gate_accepts_fast_slice(self):
+        self.responders["/live.m3u8"] = lambda req: web.Response(
+            text="#EXTM3U\n#EXTINF:6.0,\n/seg.ts\n", content_type="application/vnd.apple.mpegurl"
+        )
+        self.responders["/seg.ts"] = lambda req: web.Response(
+            body=make_ts_payload(500), content_type="video/mp2t"
+        )
+
+        checker = NoDiskChecker(timeout=2, workers=1, min_speed_kbs=80.0, speed_sample_kb=64)
+        alive, channel, msg = await self.check_once(checker, "/live.m3u8")
+        self.assertTrue(alive)
+        self.assertIn("流速", msg)
+
+
 if __name__ == "__main__":
     unittest.main()

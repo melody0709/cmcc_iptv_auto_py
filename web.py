@@ -39,8 +39,8 @@ EXTRACT_GROUPS = [
 # 港澳台两组整体保留，不参与 GROUP_DEFINITIONS 关键词二次分类
 PRESERVE_GROUPS = {"港澳台", "港澳台[翻]"}
 
-# 只对这些组做流检测：内网源（央视/卫视）与“港澳台[翻]”都不送检
-CHECK_GROUPS = {"港澳台"}
+# 只对这些组做流检测：内网源（央视/卫视）不送检，港澳台直连与[翻]组均送检
+CHECK_GROUPS = {"港澳台", "港澳台[翻]"}
 
 # 内网源补充分组关键词：tv.py 的“超高清4k”只认 4k/4K，
 # 这里把 8K 频道补进超高清4k（tv.py 本身不改）
@@ -71,7 +71,13 @@ ENABLE_STREAM_CHECK = True
 CHECK_TIMEOUT = 5
 CHECK_WORKERS = 4
 ENABLE_PROBE = True
-CHECK_CACHE_EXPIRE = 24
+CHECK_CACHE_EXPIRE = 48
+# 测速门限配置（港澳台已走大流量直连通道，剔除限速30K假死源）
+# 实测正常可播放源均 >= 250 KB/s（典型 1.2MB/s~6MB/s），限速源锁死在 25~31 KB/s
+CHECK_MIN_SPEED_KBS = 80.0
+CHECK_SPEED_SAMPLE_KB = 125
+CHECK_SPEED_DURATION = 2.0
+CHECK_SEGMENT_PROBESIZE = 500000
 
 if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -448,13 +454,17 @@ def run_stream_check(grouped_channels):
         timeout=CHECK_TIMEOUT,
         workers=CHECK_WORKERS,
         enable_probe=ENABLE_PROBE,
-        cache_expire_hours=CHECK_CACHE_EXPIRE
+        cache_expire_hours=CHECK_CACHE_EXPIRE,
+        min_speed_kbs=CHECK_MIN_SPEED_KBS,
+        speed_sample_kb=CHECK_SPEED_SAMPLE_KB,
+        speed_sample_duration=CHECK_SPEED_DURATION,
+        segment_probesize=CHECK_SEGMENT_PROBESIZE
     )
 
     channels_to_check = []
     skipped_groups = []
     for group, ch_list in grouped_channels.items():
-        # 内网源（央视/卫视）与“港澳台[翻]”不送检，原样保留
+        # 内网源（央视/卫视）不送检，原样保留
         if CHECK_GROUPS and group not in CHECK_GROUPS:
             if ch_list:
                 skipped_groups.append(f"{group}({len(ch_list)})")
@@ -481,7 +491,11 @@ def run_stream_check(grouped_channels):
         return grouped_channels
 
     if sys.platform == 'win32':
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        event_loop_policy = (
+            asyncio.WindowsProactorEventLoopPolicy()
+            if ENABLE_PROBE else asyncio.WindowsSelectorEventLoopPolicy()
+        )
+        asyncio.set_event_loop_policy(event_loop_policy)
     processed = asyncio.run(checker.process_channel_list(channels_to_check))
 
     dead_count = 0

@@ -102,7 +102,7 @@ CHECK_TARGET_GROUPS = ["港澳台"]    # 需要被检测的分组名称列表 (�
 CHECK_TIMEOUT = 5                  # 单个频道探测超时时间(秒)
 CHECK_WORKERS = 4                  # 并发检测线程数 (群晖建议 4-8)
 ENABLE_PROBE = True                # 是否启用 ffprobe 进行 1080P/4K 画质深度探测
-CHECK_CACHE_EXPIRE = 24            # ffprobe 画质探测缓存过期时间(小时)
+CHECK_CACHE_EXPIRE = 48            # ffprobe 画质探测缓存过期时间(小时)
 
 # 扩展黑名单配置
 BLACKLIST_RULES = {
